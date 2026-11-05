@@ -98,12 +98,17 @@ class Art {
     private val gloopCache = HashMap<Int, Array<Bitmap>>()
 
     init {
-        buildings[Bld.HOUSE] = building(6, 5, c(0xFFE8D6B0), c(0xFFB84A3A), 3, 0)
-        buildings[Bld.BARN] = building(6, 5, c(0xFFB43A2E), c(0xFF5A4E4E), 3, 1)
-        buildings[Bld.STORE] = building(6, 5, c(0xFFE6CC92), c(0xFF3E8E5A), 3, 2)
-        buildings[Bld.CENTER] = building(6, 5, c(0xFFF4F2EC), c(0xFFE0607A), 3, 3)
-        buildings[Bld.SMITHY] = building(5, 4, c(0xFF9A948C), c(0xFF4A4448), 2, 4)
-        buildings[Bld.CAVE] = caveEntrance()
+        val B = Buildings
+        buildings[Bld.HOUSE] = B.hipped(6, 5, 3, Buildings.Style(c(0xFFEAD9B4), c(0xFFC0503E), c(0xFFF4EEE0),
+            shutters = c(0xFF4E7A5A), chimney = 14, porch = true, flowerBoxes = true)).bmp()
+        buildings[Bld.BARN] = B.barn(6, 5, 3).bmp()
+        buildings[Bld.STORE] = B.hipped(6, 5, 3, Buildings.Style(c(0xFFD9B884), c(0xFF3E8E5A), c(0xFFF4EEE0),
+            siding = Buildings.BOARDS, door = c(0xFF3E7A4E), awning = c(0xFF3E8E5A), sign = 1)).bmp()
+        buildings[Bld.CENTER] = B.hipped(6, 5, 3, Buildings.Style(c(0xFFF2EEE6), c(0xFFE0607A), c(0xFFFAF6F0),
+            glassDoor = true, sign = 2, flowerBoxes = true)).bmp()
+        buildings[Bld.SMITHY] = B.hipped(5, 4, 2, Buildings.Style(c(0xFF9A948C), c(0xFF4E4A5C), c(0xFF8A6446),
+            siding = Buildings.STONE, door = c(0xFF6A4634), chimney = 4, sign = 3, windows = 0, forgeGlow = true)).bmp()
+        buildings[Bld.CAVE] = B.cave(5, 4).bmp()
         npcFrames["hollis"] = personFrames(c(0xFFE8B890), c(0xFFD8D8D8), c(0xFF6A3E8E), c(0xFF3A3A3A), 1)
         npcFrames["pia"] = personFrames(c(0xFFF4D2B4), c(0xFFE07A3A), c(0xFF3E9A6A), c(0xFF5A4A3A), 2)
         npcFrames["wren"] = personFrames(c(0xFFC89068), c(0xFF2A2A2A), c(0xFFE0B23A), c(0xFF3E5A3A), 3)
@@ -112,9 +117,13 @@ class Art {
     }
 
     fun cottage(variant: Int): Bitmap = buildings.getOrPut(100 + variant) {
-        val walls = arrayOf(c(0xFFBFD4E6), c(0xFFE6C8C8), c(0xFFD6E6BC))
-        val roofs = arrayOf(c(0xFF6A4A3A), c(0xFF3A5A8A), c(0xFF8A5A2A))
-        building(4, 4, walls[variant % 3], roofs[variant % 3], 1 + variant % 2, 5)
+        val v = variant % 3
+        val walls = arrayOf(c(0xFFC4D6E6), c(0xFFEACCC4), c(0xFFD6E4BC))
+        val roofs = arrayOf(c(0xFF7A5A44), c(0xFF4A6A9A), c(0xFF9A6234))
+        val shut = arrayOf(c(0xFF4A6A9A), c(0xFF8A4A5A), c(0xFF5A7A3E))
+        Buildings.hipped(4, 4, 1 + variant % 2, Buildings.Style(walls[v], roofs[v], c(0xFFF4EEE0),
+            shutters = shut[v], chimney = if (v == 1) null else 6, flowerBoxes = v != 2, porch = v == 2, windows = 1,
+            door = arrayOf(c(0xFF8A5634), c(0xFF5A6A8A), c(0xFF7A4A2A))[v])).bmp()
     }
 
     // =====================================================================
@@ -392,67 +401,6 @@ class Art {
         p.rect(1, 6, 14, 1, c(0xFFF2C842)); p.rect(1, 2, 1, 13, c(0xFFF2C842)); p.rect(14, 2, 1, 13, c(0xFFF2C842))
         p.rect(7, 5, 2, 4, c(0xFFF2C842))
         p.outline(OUT); return p.bmp()
-    }
-
-    private fun caveEntrance(): Bitmap {
-        val p = Px(80, 64); val rock = c(0xFF7E6E60)
-        p.ell(40f, 40f, 40f, 30f, rock)
-        p.ellOn(52f, 50f, 30f, 18f, S.shade(rock, 0.8f))
-        p.ellOn(26f, 22f, 16f, 8f, S.lighten(rock, 0.2f))
-        p.rect(0, 52, 80, 12, rock)
-        p.ell(40f, 54f, 10f, 13f, c(0xFF120E0C)); p.rect(30, 54, 21, 10, c(0xFF120E0C))
-        p.rect(29, 41, 3, 23, c(0xFF8E5A30)); p.rect(49, 41, 3, 23, c(0xFF8E5A30)); p.rect(28, 40, 25, 3, c(0xFFA8784A))
-        p.outline(OUT); return p.bmp()
-    }
-
-    // ---- buildings ----
-    private fun building(tw: Int, th: Int, wall: Int, roof: Int, doorX: Int, style: Int): Bitmap {
-        val w = tw * 16; val h = th * 16
-        val p = Px(w, h)
-        val roofH = (h * 0.5f).toInt()
-        val wallD = S.shade(wall, 0.82f)
-        // walls
-        p.rect(2, roofH - 2, w - 4, h - roofH + 2, wall)
-        for (y in roofH until h step 4) p.rect(2, y, w - 4, 1, wallD)
-        p.rect(2, h - 3, w - 4, 3, S.shade(wall, 0.65f))
-        // roof
-        for (y in 0 until roofH) {
-            val inset = ((roofH - y) * 0.35f).toInt()
-            val col = if (y % 4 == 3) S.shade(roof, 0.78f) else roof
-            p.rect(inset, y + 2, w - inset * 2, 1, col)
-        }
-        p.rect(0, roofH, w, 2, S.shade(roof, 0.6f))
-        p.rect(w / 4, 2, w / 2, 2, S.lighten(roof, 0.25f))
-        // door
-        val dx = doorX * 16 + 3
-        val doorCol = when (style) { 1 -> c(0xFFF4F0E6); 3 -> c(0xFF9AD0F0); else -> c(0xFF6E4422) }
-        p.rect(dx, h - 15, 10, 15, doorCol)
-        p.rect(dx, h - 15, 10, 1, S.shade(doorCol, 0.6f))
-        if (style == 1) { p.line(dx, h - 15, dx + 9, h - 1, c(0xFFB43A2E)); p.line(dx + 9, h - 15, dx, h - 1, c(0xFFB43A2E)) }
-        else p.set(dx + 8, h - 8, c(0xFFF2C842))
-        // windows
-        val winY = roofH + 4
-        for (wx in listOf(8, w - 18)) {
-            if (kotlin.math.abs(wx + 5 - (dx + 5)) < 14) continue
-            p.rect(wx, winY, 10, 8, c(0xFF8E5A30)); p.rect(wx + 1, winY + 1, 8, 6, c(0xFF9AD0F0))
-            p.rect(wx + 5, winY + 1, 1, 6, c(0xFF8E5A30)); p.rect(wx + 2, winY + 2, 2, 2, c(0xFFE4F4FF))
-        }
-        when (style) {
-            2 -> { // store awning + sign
-                for (x in 4 until w - 4) p.rect(x, roofH + 1, 1, 4, if ((x / 4) % 2 == 0) c(0xFFF4F0E6) else c(0xFF3E8E5A))
-                p.rect(w / 2 - 10, roofH - 10, 20, 7, c(0xFFF2D24A)); p.rect(w / 2 - 6, roofH - 8, 12, 3, c(0xFF8E5A30))
-            }
-            3 -> { // center sign with plus
-                p.rect(w / 2 - 7, roofH - 12, 14, 10, c(0xFFF4F2EC))
-                p.rect(w / 2 - 1, roofH - 10, 3, 7, c(0xFFE0607A)); p.rect(w / 2 - 4, roofH - 8, 9, 3, c(0xFFE0607A))
-            }
-            4 -> { // smithy chimney
-                p.rect(w - 16, 0, 6, roofH - 2, c(0xFF6A5C50)); p.rect(w - 17, 0, 8, 2, c(0xFF4A4038))
-            }
-            0 -> { p.rect(w - 20, 0, 5, roofH - 4, c(0xFF8E4A3A)) }
-        }
-        p.outline(OUT)
-        return p.bmp()
     }
 
     // =====================================================================

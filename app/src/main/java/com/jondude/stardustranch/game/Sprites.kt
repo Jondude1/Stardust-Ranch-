@@ -340,4 +340,156 @@ object Sprites {
         ....ssssss......
     """.trimIndent().lines()
 
+    // ---------------------------------------------------------------------------------------------
+    // Building details (decoded with ramps built in Buildings.kt).
+    //   o outline   F frame light  f frame base  k frame dark
+    //   D/M/B/L/H material ramp (dark..highlight)   a/b/c/w glass (deep..glint)   y/Y brass (light/dark)
+    //   g/G leaf (light/dark)   p/P petal (light/dark)   q/Q second petal
+    // ---------------------------------------------------------------------------------------------
+    val WINDOW = """
+        oooooooooooooo
+        oFFFFFFFFFFFFo
+        oFaaaaakaaabko
+        oFaaabbkaabcko
+        oFaabbckabcwko
+        oFabbcwkbcwbko
+        oFbbcwbkcwbbko
+        oFkkkkkkkkkkko
+        oFaaabbkaabbko
+        oFaabbckabbcko
+        oFabbcwkbbcwko
+        oFbbcwbkbcwbko
+        okkkkkkkkkkkko
+        FFFFFFFFFFFFFF
+        offfffffffffko
+        .oooooooooooo.
+    """.trimIndent().lines()
+
+    val SHUTTER = """
+        oooo
+        oLBo
+        oMMo
+        oLBo
+        oMMo
+        oLBo
+        oMMo
+        oLBo
+        oMMo
+        oLBo
+        oMMo
+        oDDo
+    """.trimIndent().lines()
+
+    val FLOWERBOX = """
+        .pP.gqQ.Pp.qg.
+        pPPgGqQgpPgQqg
+        gGgGgGgGGgGgGg
+        oLLLLLLLLLLLLo
+        oBBBBBBBBBBBMo
+        .oooooooooooo.
+    """.trimIndent().lines()
+
+    val DOOR = """
+        oooooooooooooo
+        oFFFFFFFFFFFFo
+        oFDDDDDDDDDDko
+        oFBLLLDBLLLDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLBBDko
+        oFBDDDDBDDDDko
+        oFBBBBBBBBBDko
+        oFBLLLDBLLLDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLyYDko
+        oFBLBBDBLYBDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLBBDko
+        oFBLBBDBLBBDko
+        oFBDDDDBDDDDko
+        oFBBBBBBBBBDko
+        oFMMMMMMMMMMko
+        oFMMMMMMMMMMko
+    """.trimIndent().lines()
+
+    val GLASS_DOOR = """
+        oooooooooooooooooo
+        oFFFFFFFFFFFFFFFFo
+        oFkkkkkkkkkkkkkkko
+        oFkaaabbkkaabbckko
+        oFkaabbckkabbcwkko
+        oFkabbcwkkbbcwbkko
+        oFkbbcwbkkbcwbbkko
+        oFkbcwbbkkcwbbbkko
+        oFkcwbbbkkwbbbbkko
+        oFkwbbbbkkbbbbbkko
+        oFkbbbbbkkbbbbbkko
+        oFkbbbbbkkbbbbbkko
+        oFkbbbbykkybbbbkko
+        oFkbbbbYkkYbbbbkko
+        oFkbbbbbkkbbbbbkko
+        oFkbbbbbkkbbbbbkko
+        oFkabbbbkkabbbbkko
+        oFkaabbbkkaabbbkko
+        oFkaaabbkkaaabbkko
+        oFkaaaabkkaaaabkko
+        oFkkkkkkkkkkkkkkko
+        oFkkkkkkkkkkkkkkko
+        oFMMMMMMMMMMMMMMko
+        oFMMMMMMMMMMMMMMko
+    """.trimIndent().lines()
+
+    /** Round plaque with a plus (healer sign). */
+    val SIGN_PLUS = """
+        ....oooooo....
+        ..ooHHHHHHoo..
+        .oHHLLLLLLLHo.
+        .oHLLLppLLLBo.
+        oHLLLLpPLLLLBo
+        oHLLpppPppPLBo
+        oHLLpPPPPPPLBo
+        oHLLLLpPLLLLBo
+        oHLLLLpPLLLBBo
+        .oLLLLLLLLBBo.
+        .oBLBBBBBBBMo.
+        ..ooBBBBMMoo..
+        ....oooooo....
+    """.trimIndent().lines()
+
+    /** Hanging shop board with a little produce sack. */
+    val SIGN_SHOP = """
+        .....k..............k.....
+        .....k..............k.....
+        oooooooooooooooooooooooooo
+        oHHHHHHHHHHHHHHHHHHHHHHHHo
+        oHLLLLLLLLLggLLLLLLLLLLLBo
+        oHLLLLLLLLggGgLLLLLLLLLLBo
+        oHLLLLLLLppPPpLLLLLLLLLLBo
+        oHLLLLLLpPPPPPPLLqqLLLLLBo
+        oHLLLLLLpPPPPPPLqQQqLLLLBo
+        oHLLLLLLLpPPPPLLqQQqLLLLBo
+        oHLLLLLLLLLLLLLLLqqLLLLLBo
+        oBBBBBBBBBBBBBBBBBBBBBBBMo
+        oooooooooooooooooooooooooo
+    """.trimIndent().lines()
+
+    /** Anvil-and-flame plaque for the smithy. */
+    val SIGN_ANVIL = """
+        oooooooooooooooooo
+        oHHHHHHHHHHHHHHHHo
+        oHLLLLLLqLLLLLLLBo
+        oHLLLLLqQqLLLLLLBo
+        oHLLLLLqQqLLLLLLBo
+        oHLLccccccccLLLLBo
+        oHLLLcbbbbbbbbcLBo
+        oHLLLLLcbbbcLLLLBo
+        oHLLLLLcbbbcLLLLBo
+        oHLLLLcbbbbbcLLLBo
+        oBBBBBBBBBBBBBBBMo
+        oooooooooooooooooo
+    """.trimIndent().lines()
 }

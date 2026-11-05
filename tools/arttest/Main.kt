@@ -94,8 +94,10 @@ fun main(args: Array<String>) {
     for ((pi, fr) in people.withIndex()) for (d in 0..3) is_.draw(fr[d][1], (pi * 4 + d) * 17 * 3, oy, 3)
     is_.save("$out/items.png")
     // buildings
-    val bs = Sheet(1200, 360); bs.fill(0xFF6CB84A.toInt()); var bx = 0
-    for (t in listOf(Bld.HOUSE, Bld.BARN, Bld.STORE, Bld.CENTER, Bld.SMITHY, Bld.CAVE)) { val b = art.buildings[t]!!; bs.draw(b, bx, 10, 2); bx += b.width * 2 + 6 }
+    val bs = Sheet(1400, 420); bs.fill(0xFF6CB84A.toInt()); var bx = 4
+    for (t in listOf(Bld.HOUSE, Bld.BARN, Bld.STORE, Bld.CENTER)) { val b = art.buildings[t]!!; bs.draw(b, bx, 210 - b.height * 2, 2); bx += b.width * 2 + 8 }
+    bx = 4
+    for (b in listOf(art.buildings[Bld.SMITHY]!!, art.buildings[Bld.CAVE]!!, art.cottage(0), art.cottage(1), art.cottage(2))) { bs.draw(b, bx, 416 - b.height * 2, 2); bx += b.width * 2 + 8 }
     bs.save("$out/buildings.png")
 
     // nature sheet: trees/pines/bushes/weeds per season + stones
@@ -133,18 +135,20 @@ fun main(args: Array<String>) {
     // battle sim in forest
     g.warp("forest", 23.5f, 3.5f, 0)
     println("forest wilds=${g.cur.wilds.size} species=${g.cur.wilds.map { it.mon.sp.name + it.mon.level }}")
-    val w = g.cur.wilds.first()
-    g.startBattle(w)
-    val b = g.battle!!
-    var turns = 0
-    while (!b.over && turns < 60) {
+    val w = g.cur.wilds.firstOrNull()
+    if (w != null) {
+        g.startBattle(w)
+        val b = g.battle!!
+        var turns = 0
+        while (!b.over && turns < 60) {
+            while (b.msgs.isNotEmpty()) println("  > " + b.msgs.removeFirst())
+            if (b.over) break
+            if (b.wild.hp < b.wild.maxHp / 2 && g.inv.count(Items.ORB) > 0) b.throwOrb(Items.ORB) else b.chooseMove(b.active.moves().first { !it.heal })
+            turns++
+        }
         while (b.msgs.isNotEmpty()) println("  > " + b.msgs.removeFirst())
-        if (b.over) break
-        if (b.wild.hp < b.wild.maxHp / 2 && g.inv.count(Items.ORB) > 0) b.throwOrb(Items.ORB) else b.chooseMove(b.active.moves().first { !it.heal })
-        turns++
+        g.endBattle()
     }
-    while (b.msgs.isNotEmpty()) println("  > " + b.msgs.removeFirst())
-    g.endBattle()
     println("party now=${g.party.map { it.name + " " + it.sp.name + " Lv" + it.level }}  mode=${g.mode}")
     // mines
     g.enterMine(1)
