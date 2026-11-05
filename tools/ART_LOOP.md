@@ -33,3 +33,4 @@ What "Stardew-level" means in practice:
 
 ## Runs
 - 2026-11-05: v1.0.1 baseline — all art procedural, first playable build.
+- 2026-11-05: Area 3 (trees/rocks/bushes/debris) — replaced procedural shapes with hand-authored palette grids in Sprites.kt (Px.grid): 48x80 clumped-canopy trees with seasonal palettes (blossom, fruit, amber, bare+snow), 32x64 tiered pines with winter snow rims, 5-tone rocks/ore/boulder/bush/weed/stick with soft ground shadows; canopies fade when the player is behind them; harness adds nature.png. v1.0.3
