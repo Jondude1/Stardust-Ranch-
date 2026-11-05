@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- star -->
+    <path android:fillColor="#FFE07A"
+        android:pathData="M54,22 L58,34 L70,34 L60,41 L64,53 L54,46 L44,53 L48,41 L38,34 L50,34 Z" />
+    <!-- round critter -->
+    <path android:fillColor="#7ED36B" android:pathData="M54,86 m-16,0 a16,13 0 1,0 32,0 a16,13 0 1,0 -32,0" />
+    <path android:fillColor="#3E8C3A" android:pathData="M54,62 C48,66 48,72 54,74 C60,72 60,66 54,62 Z" />
+    <path android:fillColor="#1A1A1A" android:pathData="M46,82h4v5h-4zM58,82h4v5h-4z" />
+</vector>
