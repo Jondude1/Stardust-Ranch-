@@ -65,9 +65,9 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
         }
         if (g != null) {
             for (w in a.wilds) if (w.y.toInt() == y) sh.draw(art.mon(w.mon.speciesId)[0], ((w.x - x0) * T - 16).toInt() * s, ((w.y - y0) * T - 30).toInt() * s, s)
-            for (n in g.npcs) if (n.area == a.id && n.y.toInt() == y) sh.draw(art.npcFrames[n.key]!![0][0], ((n.x - x0) * T - 8).toInt() * s, ((n.y - y0) * T - 22).toInt() * s, s)
+            for (n in g.npcs) if (n.area == a.id && n.y.toInt() == y) sh.draw(People.npc[n.key]!![0][0], ((n.x - x0) * T - 8).toInt() * s, ((n.y - y0) * T - 29).toInt() * s, s)
             if (g.cur === a && g.py.toInt() == y) {
-                sh.draw(art.player[0][0], ((g.px - x0) * T - 8).toInt() * s, ((g.py - y0) * T - 22).toInt() * s, s)
+                sh.draw(People.player[0][0], ((g.px - x0) * T - 8).toInt() * s, ((g.py - y0) * T - 29).toInt() * s, s)
                 g.party.firstOrNull()?.let { sh.draw(art.mon(it.speciesId)[0], ((g.px - 1.2f - x0) * T - 16).toInt() * s, ((g.py - y0) * T - 30).toInt() * s, s) }
             }
         }
@@ -90,9 +90,13 @@ fun main(args: Array<String>) {
     var oy = ((ids.size + 15) / 16) * isz + 10
     for (cI in Crops.list.indices) for (st in 0..4) { val b = art.crop(cI, st); is_.draw(b, (cI % 3 * 5 + st) * isz, oy + (cI / 3) * 34 * 3 - (b.height - 16) * 3 + 16 * 3, 3) }
     oy += 5 * 34 * 3 + 10
-    val people = listOf(art.player) + art.npcFrames.values
+    val people = listOf(People.player) + People.npc.values
     for ((pi, fr) in people.withIndex()) for (d in 0..3) is_.draw(fr[d][1], (pi * 4 + d) * 17 * 3, oy, 3)
     is_.save("$out/items.png")
+    // people sheet: every character, every direction x frame (idle + 4 walk), plus portraits
+    val ps = Sheet(20 * 18 * 4, people.size * 34 * 4); ps.fill(0xFF78B45A.toInt())
+    for ((pi, fr) in people.withIndex()) for (d in 0..3) for (f in 0..4) ps.draw(fr[d][f], ((d * 5 + f) * 18) * 4, (pi * 34 + 1) * 4, 4)
+    ps.save("$out/people.png")
     // buildings
     val bs = Sheet(1400, 420); bs.fill(0xFF6CB84A.toInt()); var bx = 4
     for (t in listOf(Bld.HOUSE, Bld.BARN, Bld.STORE, Bld.CENTER)) { val b = art.buildings[t]!!; bs.draw(b, bx, 210 - b.height * 2, 2); bx += b.width * 2 + 8 }

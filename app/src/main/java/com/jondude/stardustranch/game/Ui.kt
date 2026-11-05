@@ -285,10 +285,10 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     private fun drawEntitiesInRow(c: Canvas, a: Area, row: Int) {
         if (a.id == "farm") for (p in g.pen) if (floor(p.y).toInt() == row) drawMonWorld(c, p.mon, p.x, p.y, p.flip, g.frame + p.x, 0.75f)
         for (n in g.npcs) if (n.area == a.id && floor(n.y).toInt() == row) {
-            val fr = art.npcFrames[n.key]!!
+            val fr = People.npc[n.key]!!
             val sx = n.x * T - camX; val sy = n.y * T - camY
             drawShadow(c, sx, sy, T * 0.6f)
-            bmp(c, fr[n.dir][0], sx - 8 * sc, sy - 22 * sc)
+            bmp(c, fr[n.dir][0], sx - 8 * sc, sy - 29 * sc)
         }
         for (w in a.wilds) if (floor(w.y).toInt() == row) {
             drawMonWorld(c, w.mon, w.x, w.y, w.flip, w.anim, if (w.mon.speciesId == 35) 1.1f else 0.8f)
@@ -308,12 +308,12 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     private fun drawPlayer(c: Canvas) {
         val sx = g.px * T - camX; val sy = g.py * T - camY
-        val fr = if (g.moving) (if ((g.walkT * 2.2f).toInt() % 2 == 0) 1 else 2) else 0
+        val fr = if (g.moving) 1 + (g.walkT * 4.4f).toInt() % 4 else 0
         drawShadow(c, sx, sy, T * 0.6f)
         if (g.hurtT > 0 && ((g.hurtT * 16).toInt() % 2 == 0)) return
         // tool swing behind when facing up
         if (g.swingT > 0 && g.dir == 1) drawSwing(c, sx, sy)
-        bmp(c, art.player[g.dir][fr], sx - 8 * sc, sy - 22 * sc)
+        bmp(c, People.player[g.dir][fr], sx - 8 * sc, sy - 29 * sc)
         if (g.swingT > 0 && g.dir != 1) drawSwing(c, sx, sy)
     }
 
@@ -505,7 +505,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             val npc = g.npcs.firstOrNull { it.name == n }
             if (npc != null) {
                 panel(c, l, t - 92 * u, l + 86 * u, t - 4 * u)
-                bmp(c, art.npcFrames[npc.key]!![0][0], l + 13 * u, t - 88 * u, 60 * u, 90 * u * 0.92f)
+                bmp(c, People.portraits[npc.key]!!, l + 11 * u, t - 88 * u, 64 * u, 88 * u)
             }
             text(c, n, l + 14 * u, ty, 14f, 0xFF8E3A1E.toInt()); ty += 20 * u
         }
@@ -702,7 +702,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         for ((i, n) in g.npcs.withIndex()) {
             val y = a.top + i * rowH
             fill.color = 0xFFEBD7A8.toInt(); c.drawRoundRect(a.left, y + 2 * u, a.right, y + rowH - 2 * u, 5 * u, 5 * u, fill)
-            bmp(c, art.npcFrames[n.key]!![0][0], a.left + 8 * u, y + 3 * u, (rowH - 6 * u) * 0.66f, rowH - 6 * u)
+            bmp(c, People.portraits[n.key]!!, a.left + 8 * u, y + 3 * u, (rowH - 6 * u) * 16f / 22f, rowH - 6 * u)
             text(c, n.name, a.left + rowH, y + rowH * 0.45f, 14f)
             text(c, "Lives in the ${n.area}" + (if (n.key in g.giftedToday) " · gifted today" else ""), a.left + rowH, y + rowH * 0.8f, 10f, 0xFF6E5A48.toInt())
             val pts = g.friendship[n.key] ?: 0
