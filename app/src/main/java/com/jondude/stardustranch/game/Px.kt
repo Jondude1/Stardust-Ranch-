@@ -96,6 +96,15 @@ class Px(val w: Int, val h: Int) {
     fun bmp(): Bitmap = Bitmap.createBitmap(p, w, h, Bitmap.Config.ARGB_8888)
 
     companion object {
+        /** Decodes a hand-authored text grid (one char per pixel, '.' = transparent) through a palette map. */
+        fun grid(rows: List<String>, pal: Map<Char, Int>): Px {
+            val w = rows.maxOf { it.length }; val o = Px(w, rows.size)
+            for ((y, row) in rows.withIndex()) for ((x, ch) in row.withIndex()) {
+                if (ch == '.' || ch == ' ') continue
+                o.p[y * w + x] = pal[ch] ?: error("no palette entry for '$ch'")
+            }
+            return o
+        }
         fun shade(c: Int, f: Float): Int {
             val a = c ushr 24 and 0xFF
             val r = ((c shr 16 and 0xFF) * f).toInt().coerceIn(0, 255)

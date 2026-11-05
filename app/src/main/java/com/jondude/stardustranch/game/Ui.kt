@@ -45,6 +45,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     // paints
     private val px = Paint().apply { isFilterBitmap = false; isAntiAlias = false }
+    /** Tree canopies fade when the player walks behind them so the player is never lost in the foliage. */
+    private val canopyFade = Paint().apply { isFilterBitmap = false; isAntiAlias = false; alpha = 120 }
     private val fill = Paint().apply { isAntiAlias = true }
     private val stroke = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE }
     private val txt = Paint().apply { isAntiAlias = true; typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD) }
@@ -188,7 +190,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         // rows painter
         val rowEnd = min(a.h - 1, y1 + 6)
         for (y in y0..rowEnd) {
-            if (y <= y1 + 3) for (x in x0..x1) drawCell(c, a, x, y)
+            if (y <= y1 + 5) for (x in x0..x1) drawCell(c, a, x, y)
             for ((bi, b) in a.buildings.withIndex()) if (b.y + b.th - 1 == y) {
                 val bm = if (b.type == Bld.COTTAGE) art.cottage(bi) else art.buildings[b.type] ?: continue
                 val bw = bm.width * sc.toFloat(); val bh = bm.height * sc.toFloat()
@@ -258,6 +260,10 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             Ob.BED -> bmp(c, b, sx, sy)
             Ob.FOUNTAIN -> bmp(c, b, sx, sy - T)
             Ob.FORAGE -> { val bob = sin(g.frame * 3 + x) * sc; bmp(c, b, sx + T * 0.15f, sy + T * 0.1f + bob, T * 0.7f, T * 0.7f) }
+            Ob.TREE, Ob.PINE -> {
+                val behind = abs(g.px - (x + 0.5f)) < b.width / 32f + 0.3f && g.py < y + 0.2f && g.py > y + 1f - b.height / 16f + 0.5f
+                bmp(c, b, sx + (T - bw) / 2, sy + T - bh, p = if (behind) canopyFade else px)
+            }
             else -> bmp(c, b, sx + (T - bw) / 2, sy + T - bh)
         }
     }

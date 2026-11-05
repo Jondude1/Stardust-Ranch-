@@ -23,6 +23,22 @@ class Art {
         intArrayOf(c(0xFFE8EFF4), c(0xFFD2DDE6), c(0xFFF8FBFD))
     )
     private val leafPal = arrayOf(c(0xFF4FA040), c(0xFF3C8C34), c(0xFFD9822A), c(0xFF8A6A4A))
+    // Foliage / stone palettes for the hand-authored grids in Sprites.kt (5-tone ramps, cool shadows, warm lights).
+    private val SHADOW = c(0x46101820)
+    private val barkPal = mapOf('O' to c(0xFF2E1E26), 'D' to c(0xFF4A3034), 'M' to c(0xFF6A4634), 'B' to c(0xFF8A5E3E), 'L' to c(0xFFAE8052), 's' to SHADOW)
+    private fun ramp(o: Long, d: Long, m: Long, b: Long, l: Long, h: Long) =
+        mapOf('o' to c(o), 'd' to c(d), 'm' to c(m), 'b' to c(b), 'l' to c(l), 'h' to c(h))
+    private val leafRamps = arrayOf(
+        ramp(0xFF20402F, 0xFF2F6A3A, 0xFF46913E, 0xFF68B248, 0xFF94D05A, 0xFFCAEA7C), // spring: fresh
+        ramp(0xFF1E3A34, 0xFF2D5A3C, 0xFF3F7A3E, 0xFF5A9A42, 0xFF82BA4C, 0xFFB8DA66), // summer: deep
+        ramp(0xFF4A2228, 0xFF7A3226, 0xFFAA4E2A, 0xFFD27A30, 0xFFEAA442, 0xFFF8D46E), // fall: amber
+        ramp(0xFF2A3440, 0xFF3E5058, 0xFF566E70, 0xFF708A84, 0xFF94AAA2, 0xFFC4D2CC)  // winter: frosted
+    )
+    private val SNOW = c(0xFFF2F6FA)
+
+    private val stonePal = ramp(0xFF3A3444, 0xFF5A5466, 0xFF7C7884, 0xFF9C98A0, 0xFFC0BCBA, 0xFFE2DED4) +
+        mapOf('O' to c(0xFF4A4452), 's' to SHADOW)
+
 
     // ---- ground tiles [season][variant] ----
     val grass = Array(4) { s -> Array(4) { v -> grassTile(s, v) } }
@@ -209,98 +225,46 @@ class Art {
     // =====================================================================
 
     private fun treeSprite(s: Int): Bitmap {
-        val p = Px(32, 48)
-        val bark = c(0xFF7A5230); val barkD = c(0xFF5A3A22)
-        p.rect(13, 28, 6, 18, bark); p.rect(17, 28, 2, 18, barkD); p.rect(11, 44, 10, 2, bark)
-        if (s == 3) {
-            p.line(16, 30, 7, 14, bark); p.line(16, 30, 25, 12, bark); p.line(16, 28, 16, 6, bark)
-            p.line(9, 18, 4, 12, bark); p.line(23, 16, 28, 9, bark)
-            for (pt in listOf(7 to 13, 25 to 11, 16 to 5, 4 to 11, 28 to 8)) p.ell(pt.first.toFloat(), pt.second.toFloat(), 3f, 1.6f, c(0xFFF4F8FC))
-            p.outline(OUT); return p.bmp()
+        if (s == 3) return Px.grid(Sprites.TREE_BARE, barkPal + ('w' to SNOW)).bmp()
+        val leaf = leafRamps[s]
+        val accents = when (s) {
+            0 -> mapOf('f' to c(0xFFF6C2D2), 'F' to c(0xFFD884A6))   // blossom
+            1 -> mapOf('f' to c(0xFFE0484A), 'F' to c(0xFF9E2A3C))   // fruit
+            else -> mapOf('f' to leaf['l']!!, 'F' to leaf['b']!!)
         }
-        val base = leafPal[s]; val dark = S.shade(base, 0.75f); val light = S.lighten(base, 0.25f)
-        val r = Random(90 + s)
-        p.ell(16f, 17f, 14f, 13f, base)
-        for (i in 0 until 7) {
-            val a = i * 2 * PI / 7
-            p.ell((16 + cos(a) * 9).toFloat(), (17 + sin(a) * 8).toFloat(), 6f, 5f, base)
-        }
-        p.ellOn(20f, 23f, 11f, 9f, dark)
-        p.ellOn(11f, 11f, 7f, 5f, light)
-        repeat(18) { val x = r.nextInt(4, 28); val y = r.nextInt(5, 29); if (p.get(x, y) != 0) p.set(x, y, if (r.nextBoolean()) dark else light) }
-        if (s == 2) repeat(6) { val x = r.nextInt(6, 26); val y = r.nextInt(6, 26); if (p.get(x, y) != 0) p.set(x, y, c(0xFFC8402A)) }
-        if (s == 1) repeat(4) { val x = r.nextInt(6, 26); val y = r.nextInt(8, 26); if (p.get(x, y) != 0) { p.set(x, y, c(0xFFE84A4A)); p.set(x + 1, y, c(0xFFE84A4A)) } }
-        p.outline(OUT)
-        return p.bmp()
+        return Px.grid(Sprites.TREE, barkPal + leaf + accents).bmp()
     }
 
     private fun pineSprite(s: Int): Bitmap {
-        val p = Px(32, 48)
-        p.rect(14, 36, 4, 10, c(0xFF6E4A2A))
-        val base = if (s == 2) c(0xFF3E7A4A) else c(0xFF2E7A48)
-        val dark = S.shade(base, 0.72f)
-        for (i in 0 until 4) {
-            val top = 2f + i * 8f; val wid = 6f + i * 3.5f
-            p.tri(16f, top, 16f - wid, top + 14f, 16f + wid, top + 14f, base)
-            p.tri(16f, top + 3f, 16.5f, top + 14f, 16f + wid, top + 14f, dark)
-        }
-        if (s == 3) for (i in 0 until 4) {
-            val top = 2f + i * 8f; val wid = 6f + i * 3.5f
-            p.line((16 - wid + 2).toInt(), (top + 12).toInt(), (16 + wid - 3).toInt(), (top + 12).toInt(), c(0xFFF4F8FC))
-            p.set(16, top.toInt() + 1, c(0xFFF4F8FC))
-        }
-        p.outline(OUT)
-        return p.bmp()
+        val base = ramp(0xFF142E2C, 0xFF1F4A3A, 0xFF2C6440, 0xFF3E7E46, if (s == 2) 0xFF6A9A4E else 0xFF5E9E52, 0xFF9CC870)
+        val needle = if (s == 3) base.mapValues { (_, v) -> S.mix(v, c(0xFF7A8EA0), 0.22f) } else base
+        // 'S' marks the upward-facing rims of each tier: a snow cap in winter, empty otherwise
+        return Px.grid(Sprites.PINE, barkPal + needle + mapOf('S' to (if (s == 3) SNOW else 0), 'W' to (if (s == 3) SNOW else needle['d']!!))).bmp()
     }
 
     private fun rockSprite(base: Int, ore: Int, kind: Int): Bitmap {
-        val p = Px(16, 16); val r = Random(200 + kind)
-        p.ell(8f, 10f, 7f, 5.5f, base)
-        p.ellOn(10f, 12f, 6f, 4f, S.shade(base, 0.8f))
-        p.ellOn(6f, 7f, 3.5f, 2f, S.lighten(base, 0.3f))
-        if (ore != 0) repeat(if (kind == 4) 3 else 5) {
-            val x = r.nextInt(3, 13); val y = r.nextInt(7, 14)
-            if (p.get(x, y) != 0) {
-                p.set(x, y, ore); p.set(x + 1, y, ore); p.set(x, y - 1, S.lighten(ore, 0.4f))
-                if (kind == 4) { p.set(x, y - 2, ore); p.set(x + 1, y - 1, ore) }
-            }
-        }
-        p.outline(OUT)
-        return p.bmp()
+        // tint the stone ramp toward the requested base colour (gem rocks are violet, coal rocks darker)
+        val stone = stonePal.mapValues { (k, v) -> if (k == 's') v else S.mix(v, base, if (k in "oO") 0.1f else 0.22f) }
+        val fleck = if (ore == 0) mapOf('x' to stone['b']!!, 'X' to stone['m']!!, 'y' to stone['l']!!)
+        else mapOf('x' to ore, 'X' to S.shade(ore, 0.62f), 'y' to S.lighten(ore, 0.5f))
+        return Px.grid(Sprites.ROCK, stone + fleck).bmp()
     }
 
-    private fun boulderSprite(): Bitmap {
-        val p = Px(16, 16); val base = c(0xFF7E7670)
-        p.ell(8f, 9f, 8f, 7f, base)
-        p.ellOn(10f, 12f, 7f, 5f, S.shade(base, 0.78f))
-        p.ellOn(5f, 5f, 4f, 2.5f, S.lighten(base, 0.3f))
-        p.line(6, 8, 9, 11, S.shade(base, 0.6f)); p.line(9, 11, 12, 10, S.shade(base, 0.6f))
-        p.outline(OUT)
-        return p.bmp()
-    }
+    private fun boulderSprite(): Bitmap = Px.grid(Sprites.BOULDER, stonePal.mapValues { (k, v) -> if (k == 's') v else S.shade(v, 0.92f) }).bmp()
 
-    private fun weedSprite(s: Int): Bitmap {
-        val p = Px(16, 16); val col = if (s == 3) c(0xFF8A9AA4) else if (s == 2) c(0xFFB0882E) else c(0xFF3E9A36)
-        val lt = S.lighten(col, 0.3f)
-        for ((x, h) in listOf(4 to 6, 6 to 9, 8 to 7, 10 to 10, 12 to 6)) {
-            p.line(x, 15, x + (if (x < 8) -1 else 1), 15 - h, col); p.set(x, 15 - h + 1, lt)
-        }
-        p.outline(OUT); return p.bmp()
-    }
+    private fun weedSprite(s: Int): Bitmap = Px.grid(Sprites.WEED, leafRamps[s] + ('s' to SHADOW)).bmp()
 
-    private fun stickSprite(): Bitmap {
-        val p = Px(16, 16)
-        p.line(2, 12, 13, 8, c(0xFF7A5230)); p.line(2, 13, 13, 9, c(0xFF5A3A22)); p.line(7, 10, 9, 6, c(0xFF7A5230))
-        p.outline(OUT); return p.bmp()
-    }
+    private fun stickSprite(): Bitmap =
+        Px.grid(Sprites.STICK, ramp(0xFF2E1E26, 0xFF4A3034, 0xFF6A4634, 0xFF8A5E3E, 0xFFAE8052, 0xFFD0A070) + ('s' to SHADOW)).bmp()
 
     private fun bushSprite(s: Int): Bitmap {
-        val p = Px(16, 16); val base = if (s == 3) c(0xFF6E8A7A) else if (s == 2) c(0xFFA87A2E) else c(0xFF3E8C3A)
-        p.ell(8f, 10f, 7.5f, 5.5f, base); p.ell(5f, 7f, 4f, 3.5f, base); p.ell(11f, 7f, 4f, 3.5f, base)
-        p.ellOn(10f, 12f, 6f, 3f, S.shade(base, 0.78f)); p.ellOn(5f, 6f, 2.5f, 1.5f, S.lighten(base, 0.3f))
-        if (s == 1) { p.set(5, 10, c(0xFF4A5AD8)); p.set(10, 8, c(0xFF4A5AD8)); p.set(8, 12, c(0xFF4A5AD8)) }
-        if (s == 3) { p.rect(3, 4, 10, 1, c(0xFFF4F8FC)) }
-        p.outline(OUT); return p.bmp()
+        val leaf = leafRamps[s]
+        val extra = mapOf(
+            'S' to if (s == 3) SNOW else leaf['l']!!,
+            'f' to when (s) { 1 -> c(0xFF4A5AD8); 0 -> c(0xFFF6C2D2); else -> leaf['b']!! },
+            's' to SHADOW
+        )
+        return Px.grid(Sprites.BUSH, leaf + extra).bmp()
     }
 
     private fun tallGrassSprite(s: Int): Bitmap {

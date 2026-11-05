@@ -9,8 +9,14 @@ class Sheet(val w: Int, val h: Int) {
     fun fill(c: Int) { for (y in 0 until h) for (x in 0 until w) img.setRGB(x, y, c) }
     fun draw(b: Bitmap, ox: Int, oy: Int, s: Int = 1) {
         for (y in 0 until b.height) for (x in 0 until b.width) {
-            val c = b.getPixel(x, y); if (c ushr 24 == 0) continue
-            for (j in 0 until s) for (i in 0 until s) { val X = ox + x * s + i; val Y = oy + y * s + j; if (X in 0 until w && Y in 0 until h) img.setRGB(X, Y, c) }
+            val c = b.getPixel(x, y); val al = c ushr 24; if (al == 0) continue
+            for (j in 0 until s) for (i in 0 until s) {
+                val X = ox + x * s + i; val Y = oy + y * s + j; if (X !in 0 until w || Y !in 0 until h) continue
+                if (al == 255) { img.setRGB(X, Y, c); continue }
+                val d = img.getRGB(X, Y); val t = al / 255f
+                fun ch(sh: Int) = (((c shr sh) and 255) * t + ((d shr sh) and 255) * (1 - t)).toInt()
+                img.setRGB(X, Y, (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0))
+            }
         }
     }
     fun save(p: String) = ImageIO.write(img, "png", File(p))
@@ -91,6 +97,14 @@ fun main(args: Array<String>) {
     val bs = Sheet(1200, 360); bs.fill(0xFF6CB84A.toInt()); var bx = 0
     for (t in listOf(Bld.HOUSE, Bld.BARN, Bld.STORE, Bld.CENTER, Bld.SMITHY, Bld.CAVE)) { val b = art.buildings[t]!!; bs.draw(b, bx, 10, 2); bx += b.width * 2 + 6 }
     bs.save("$out/buildings.png")
+
+    // nature sheet: trees/pines/bushes/weeds per season + stones
+    val ns = Sheet(4 * 52 * 3 + 4 * 36 * 3, 84 * 3 + 20 * 3); ns.fill(0xFF6CB84A.toInt())
+    for (s in 0..3) { ns.draw(art.tree[s], s * 52 * 3, 2 * 3, 3); ns.draw(art.pine[s], (4 * 52 + s * 36) * 3, 18 * 3, 3) }
+    val small = listOf(art.rock, art.copperRock, art.ironRock, art.goldRock, art.gemRock, art.coalRock, art.boulder, art.stick) +
+        (0..3).map { art.bush[it] } + (0..3).map { art.weed[it] }
+    for ((k, b) in small.withIndex()) ns.draw(b, k * 20 * 3, 84 * 3, 3)
+    ns.save("$out/nature.png")
 
     // game sim
     val f = File("$out/save.json"); f.delete()
