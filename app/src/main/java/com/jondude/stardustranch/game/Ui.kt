@@ -75,6 +75,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     private val barCache = HashMap<Int, IntArray>()
     private val roundCache = HashMap<String, Bitmap>()
     private var cookPick = 0
+    private val noteB = Decor.note().bmp(); private val pinB = Decor.pin().bmp()
     private val iSkill = Array(Skill.COUNT) { Skills.icon(it).bmp() }
 
     private val CREAM = 0xFFF6E7C4.toInt()
@@ -150,7 +151,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     fun back() {
         when (g.mode) {
             Mode.PLAY -> { g.mode = Mode.MENU; g.menuSel = -1 }
-            Mode.MENU, Mode.SHOP, Mode.SMITH, Mode.RANCH, Mode.ELEVATOR, Mode.COOK -> g.mode = Mode.PLAY
+            Mode.MENU, Mode.SHOP, Mode.SMITH, Mode.RANCH, Mode.ELEVATOR, Mode.COOK, Mode.BOARD -> g.mode = Mode.PLAY
             Mode.DIALOG -> closeDialog()
             Mode.FISH -> g.fishCancel()
             Mode.SKILLUP -> g.dismissLevelUp()
@@ -182,6 +183,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
                 Mode.FISH -> drawFishing(c)
                 Mode.COOK -> drawCook(c)
                 Mode.SKILLUP -> drawSkillUp(c)
+                Mode.BOARD -> drawBoard(c)
                 else -> {}
             }
         }
@@ -278,13 +280,14 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             Ob.SPRINKLER -> art.item(Items.SPRINKLER); Ob.QSPRINKLER -> art.item(Items.QSPRINKLER); Ob.FLOWER -> art.flower[a.aux[i] % 3]
             Ob.TABLE -> art.table; Ob.ANVIL -> art.anvil; Ob.SHELF -> art.shelf; Ob.CHEST -> art.chest; Ob.STOVE -> art.stove
             Ob.BED -> { if (a.o(x, y - 1) == Ob.BED) return; art.bed }
+            Ob.BOARD -> { if (a.o(x - 1, y) == Ob.BOARD) return; art.board }
             Ob.FOUNTAIN -> { if (a.o(x - 1, y) == Ob.FOUNTAIN || a.o(x, y + 1) == Ob.FOUNTAIN) return; art.fountain[((g.frame * 4).toInt()) % 3] }
             else -> return
         }
         val bw = b.width * sc.toFloat(); val bh = b.height * sc.toFloat()
         when (o) {
             Ob.BED -> bmp(c, b, sx, sy)
-            Ob.FOUNTAIN -> bmp(c, b, sx, sy - T)
+            Ob.FOUNTAIN, Ob.BOARD -> bmp(c, b, sx, sy + T - bh)
             Ob.FORAGE, Ob.GOODS -> { val bob = sin(g.frame * 3 + x) * sc; bmp(c, b, sx + T * 0.15f, sy + T * 0.1f + bob, T * 0.7f, T * 0.7f) }
             Ob.TREE, Ob.PINE -> {
                 val behind = abs(g.px - (x + 0.5f)) < b.width / 32f + 0.3f && g.py < y + 0.2f && g.py > y + 1f - b.height / 16f + 0.5f
@@ -669,6 +672,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             o == Ob.LADDER -> "Down"
             o == Ob.LADDERUP -> "Up"
             o == Ob.STOVE -> "Cook"
+            o == Ob.BOARD -> "Read"
             o in setOf(Ob.BOX, Ob.CHEST, Ob.HEALER, Ob.ELEVATOR, Ob.ANVIL, Ob.COUNTER) -> "Open"
             else -> "Use"
         }
@@ -1019,6 +1023,76 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             } + " Track all your skills in Menu → Skills.", w - 52 * u, 12f)) { text(c, line, l + 26 * u, y + 6 * u, 12f, 0xFF6E5A48.toInt()); y += 17 * u }
             button(c, l + w - 150 * u, t + h - 56 * u, l + w - 24 * u, t + h - 20 * u, "Great!", size = 14f) { g.dismissLevelUp() }
         }
+    }
+
+    // ---------------------------------------------------------------- bulletin board (requests)
+
+    private fun drawBoard(c: Canvas) {
+        val r = overlay(c, "Bulletin Board")
+        val a = RectF(r.left + 16 * u, r.top + 50 * u, r.right - 16 * u, r.bottom - 16 * u)
+        // cork panel in a wooden frame
+        val split = a.left + a.width() * 0.63f
+        rectS(c, a.left, a.top, split, a.bottom, 0xFF5E3A32.toInt())
+        rectS(c, a.left + 2 * hs, a.top + 2 * hs, split - 2 * hs, a.bottom - 2 * hs, 0xFFB88654.toInt())
+        rectS(c, a.left + 2 * hs, a.top + 2 * hs, split - 2 * hs, a.top + 3 * hs, 0xFF946638.toInt())
+        var k = 0
+        var yy = a.top + 4 * hs
+        while (yy < a.bottom - 3 * hs) {
+            var xx = a.left + 4 * hs + ((k * 7) % 5) * hs
+            while (xx < split - 3 * hs) {
+                rectS(c, xx, yy, xx + hs, yy + hs, if ((k + (xx / hs).toInt()) % 3 == 0) 0xFFD4A46C.toInt() else 0xFF946638.toInt())
+                xx += 9 * hs + ((k * 3) % 4) * hs; k++
+            }
+            yy += 6 * hs
+        }
+        val posted = g.postedQuests
+        val gap = 10 * u
+        val cw = (split - a.left - 4 * gap) / 3f
+        if (posted.isEmpty()) text(c, "No new notes today. New requests go up most mornings!", (a.left + split) / 2, (a.top + a.bottom) / 2, 13f, 0xFFFFF4DC.toInt(), Paint.Align.CENTER, true)
+        for ((i, q) in posted.take(Quests.MAX_POSTED).withIndex()) {
+            val l = a.left + gap + i * (cw + gap); val t = a.top + 14 * u + (i % 2) * 6 * u; val rt = l + cw; val b = a.bottom - 10 * u - ((i + 1) % 2) * 6 * u
+            nine(c, noteB, Decor.NOTE_K, l + hs, t + 2 * hs, rt + hs, b + 2 * hs, p = shadowP)
+            nine(c, noteB, Decor.NOTE_K, l, t, rt, b)
+            icon(c, pinB, (l + rt) / 2 - pinB.width * hs / 2f, t - 4 * hs)
+            val name = Quests.who[q.npc] ?: q.npc
+            People.portraits[q.npc]?.let { bmp(c, it, l + 8 * u, t + 10 * u, 24 * u, 33 * u) }
+            text(c, name.substringAfterLast(' '), l + 38 * u, t + 26 * u, 13f, 0xFF8E3A1E.toInt())
+            text(c, "${q.daysLeft} ${if (q.daysLeft == 1) "day" else "days"} left", l + 38 * u, t + 40 * u, 10f, 0xFF6E5A48.toInt())
+            bmp(c, art.item(q.item), l + 8 * u, t + 48 * u, 24 * u, 24 * u)
+            text(c, "${q.qty} × ${Items[q.item].name}", l + 36 * u, t + 64 * u, 12f)
+            var ty = t + 88 * u
+            for (line in wrap(Quests.text(q), cw - 18 * u, 10f).take(3)) { text(c, line, l + 9 * u, ty, 10f, 0xFF5A4636.toInt()); ty += 13 * u }
+            val ry = b - 54 * u
+            icon(c, iCoin, l + 9 * u, ry - iCoin.height * hs + 2 * u)
+            text(c, "${q.gold}g", l + 12 * u + iCoin.width * hs, ry, 12f, 0xFF8A5A10.toInt())
+            icon(c, iHeart, l + cw - 10 * u - iHeart.width * hs, ry - iHeart.height * hs + 2 * u)
+            if (q.bonus >= 0 && q.bonusN > 0) {
+                val bx = l + cw * 0.52f
+                bmp(c, art.item(q.bonus), bx - 4 * u, ry - 16 * u, 18 * u, 18 * u)
+                text(c, "×${q.bonusN}", bx + 15 * u, ry, 10f, 0xFF5A4636.toInt())
+            }
+            val full = g.activeQuests.size >= Quests.MAX_ACTIVE
+            button(c, l + 8 * u, b - 38 * u, rt - 8 * u, b - 10 * u, if (full) "3 jobs taken" else "Accept", !full, size = 12f) { g.acceptQuest(q) }
+        }
+        // accepted requests
+        val cl = split + 12 * u; val cr = a.right
+        val act = g.activeQuests
+        text(c, "Your requests (${act.size}/${Quests.MAX_ACTIVE})", cl, a.top + 16 * u, 13f, 0xFF8E3A1E.toInt())
+        var y = a.top + 26 * u
+        if (act.isEmpty()) {
+            for (line in wrap("Accept a note to take the job. Then bring the items to that villager and talk to them.", cr - cl, 11f)) { text(c, line, cl, y + 14 * u, 11f, 0xFF6E5A48.toInt()); y += 15 * u }
+        }
+        for (q in act) {
+            val have = g.inv.count(q.item)
+            rowBg(c, cl, y, cr, y + 52 * u, have >= q.qty)
+            bmp(c, art.item(q.item), cl + 6 * u, y + 8 * u, 26 * u, 26 * u)
+            text(c, "${q.qty} × ${Items[q.item].name}", cl + 38 * u, y + 20 * u, 12f)
+            text(c, "to ${Quests.who[q.npc]} · ${q.daysLeft}d · ${q.gold}g", cl + 38 * u, y + 37 * u, 10f, 0xFF6E5A48.toInt())
+            text(c, "$have/${q.qty}", cr - 8 * u, y + 20 * u, 12f, if (have >= q.qty) 0xFF3E7A2A.toInt() else 0xFFC0302A.toInt(), Paint.Align.RIGHT)
+            if (have >= q.qty) text(c, "Ready!", cr - 8 * u, y + 37 * u, 10f, 0xFF3E7A2A.toInt(), Paint.Align.RIGHT)
+            y += 58 * u
+        }
+        text(c, "Completed so far: ${g.questsDone}", cl, a.bottom - 6 * u, 11f, 0xFF6E5A48.toInt())
     }
 
     // ---------------------------------------------------------------- kitchen (cooking)

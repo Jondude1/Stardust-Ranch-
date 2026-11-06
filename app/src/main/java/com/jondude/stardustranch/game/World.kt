@@ -21,6 +21,7 @@ object Ob {
     const val ANVIL = 29; const val FOUNTAIN = 30; const val SHELF = 31; const val CHEST = 32; const val COALROCK = 33
     const val GOODS = 34 // ranch goods lying in the pen; aux = item id
     const val STOVE = 35 // farmhouse kitchen stove (cooking)
+    const val BOARD = 36 // town bulletin board (2 tiles wide; requests)
     fun walkable(o: Int) = o == NONE || o == TALLGRASS || o == FORAGE || o == FLOWER || o == LADDER || o == LADDERUP || o == GOODS
 }
 
@@ -164,6 +165,7 @@ object World {
         a.addBuilding(Bld.COTTAGE, 38, 25, 4, 4, 2, null, 0, 0)
         a.addBuilding(Bld.COTTAGE, 14, 27, 4, 4, 1, null, 0, 0)
         a.fillO(18, 16, 2, 2, Ob.FOUNTAIN)
+        a.fillO(28, 14, 2, 1, Ob.BOARD)
         for (i in 0 until 40) {
             val x = rng.nextInt(2, a.w - 2); val y = rng.nextInt(2, a.h - 2)
             if (a.g(x, y) == Gr.GRASS && a.o(x, y) == Ob.NONE) a.setO(x, y, if (rng.nextFloat() < 0.6f) Ob.FLOWER else Ob.BUSH, rng.nextInt(3))

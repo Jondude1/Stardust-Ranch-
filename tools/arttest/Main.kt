@@ -48,12 +48,13 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
                 Ob.FLOWER -> art.flower[a.aux[i] % 3]; Ob.TABLE -> art.table; Ob.ANVIL -> art.anvil; Ob.SHELF -> art.shelf; Ob.CHEST -> art.chest; Ob.STOVE -> art.stove
                 Ob.BED -> if (a.o(x, y - 1) == Ob.BED) null else art.bed
                 Ob.FOUNTAIN -> if (a.o(x - 1, y) == Ob.FOUNTAIN || a.o(x, y + 1) == Ob.FOUNTAIN) null else art.fountain[0]
+                Ob.BOARD -> if (a.o(x - 1, y) == Ob.BOARD) null else art.board
                 else -> null
             }
             if (b != null) {
                 val ox = (x - x0) * T + (T - b.width) / 2
-                val oy = when (o) { Ob.BED -> (y - y0) * T; Ob.FOUNTAIN -> (y - y0 - 1) * T; else -> (y - y0 + 1) * T - b.height }
-                sh.draw(b, (if (o == Ob.BED || o == Ob.FOUNTAIN) (x - x0) * T else ox) * s, oy * s, s)
+                val oy = when (o) { Ob.BED -> (y - y0) * T; else -> (y - y0 + 1) * T - b.height }
+                sh.draw(b, (if (o == Ob.BED || o == Ob.FOUNTAIN || o == Ob.BOARD) (x - x0) * T else ox) * s, oy * s, s)
             }
         }
         for (bd in a.buildings) if (bd.y + bd.th - 1 == y) {
@@ -264,6 +265,33 @@ fun drainLevelUps(g: Game): Int {
     }
     if (g.mode == Mode.SKILLUP) g.mode = Mode.PLAY
     return n
+}
+
+/** Mock of the board screen notes (Ui.drawBoard) at u = 2, hs = 3: cork, three pinned paper cards with portraits and icons. */
+fun renderBoardMock(g: Game, out: String) {
+    val art = Art()
+    val sh = Sheet(900, 420); sh.fill(0xFF5E3A32.toInt()); sh.rect(6, 6, 894, 414, 0xFFB88654.toInt())
+    val u = 2; val hs = 3
+    for (yy in 12 until 410 step 18) for (xx in (12 + (yy * 7) % 15) until 890 step 29) sh.rect(xx, yy, xx + hs, yy + hs, if ((xx + yy) % 3 == 0) 0xFFD4A46C.toInt() else 0xFF946638.toInt())
+    val qs = listOf(Quest("pia", Items.produce(1), 4, Quests.goldFor(Items.produce(1), 4), 60, Items.seed(0), 3, 3),
+        Quest("gus", Items.COPPER, 8, Quests.goldFor(Items.COPPER, 8), 60, -1, 0, 2), Quest("mira", 120, 3, Quests.goldFor(120, 3), 60, Items.SNACK, 1, 1))
+    val note = Decor.note(); val pin = Decor.pin()
+    for ((i, q) in qs.withIndex()) {
+        val l = 20 + i * 290; val t = 30 + (i % 2) * 12; val r = l + 270; val b = 400 - ((i + 1) % 2) * 12
+        sh.nine(note, Decor.NOTE_K, l, t, r, b, hs)
+        sh.px(pin, (l + r) / 2 - pin.w * hs / 2, t - 4 * hs, hs)
+        sh.draw(People.portraits[q.npc]!!, l + 16, t + 20, 3)
+        sh.text(Quests.who[q.npc]!!.substringAfterLast(' '), l + 76, t + 52, 26, 0xFF8E3A1E.toInt())
+        sh.text("${q.daysLeft} days left", l + 76, t + 80, 20, 0xFF6E5A48.toInt())
+        sh.draw(art.item(q.item), l + 16, t + 96, 3)
+        sh.text("${q.qty} x ${Items[q.item].name}", l + 72, t + 128, 24, 0xFF3A2416.toInt())
+        sh.text(Quests.text(q).take(30), l + 18, t + 176, 18, 0xFF5A4636.toInt())
+        sh.px(Hud.coin, l + 18, b - 130, hs); sh.text("${q.gold}g", l + 18 + 11 * hs, b - 108, 24, 0xFF8A5A10.toInt())
+        if (q.bonus >= 0) sh.draw(art.item(q.bonus), l + 140, b - 140, 2)
+        sh.nine(Hud.button(0xFF5DA342.toInt()), Hud.BUTTON_K, l + 16, b - 76, r - 16, b - 20, hs)
+        sh.text("Accept", (l + r) / 2, b - 40, 24, 0xFFFFFFFF.toInt(), center = true, shadow = true)
+    }
+    sh.save("$out/board.png")
 }
 
 fun main(args: Array<String>) {
@@ -524,18 +552,79 @@ fun main(args: Array<String>) {
     val skillsOk = skillTipShown && gained.filterIndexed { i, _ -> i != Skill.FISH }.all { it > 0 } && g.skillXp[Skill.FISH] > 0 && queued >= 1 && screen && needs && blocked && perkOk && g.skillLv(Skill.FARM) == 5 &&
         market == (base * 1.2f).toInt() && hoeCost in 0.9f..1.1f && Skills.iconRows.all { r -> r.all { it.length == 12 } && r.size == 12 }
     println("CHECK skills: " + if (skillsOk) "PASS" else "FAIL")
+    // bulletin board sim: board placed, intro once, accept limits, reminder, delivery rewards, expiry, balance
+    val townA = g.areas["town"]!!
+    val boardPlaced = townA.o(28, 14) == Ob.BOARD && townA.o(29, 14) == Ob.BOARD && !Ob.walkable(Ob.BOARD)
+    val postedAtStart = g.postedQuests.size
+    g.warp("town", 28.5f, 15.5f, 1); g.mode = Mode.PLAY; g.px = 28.5f; g.py = 15.5f; g.dir = 1
+    g.action()
+    val bIntro = g.mode == Mode.DIALOG && g.dialog?.pages?.size == 3 && g.boardIntro
+    g.dialog?.let { d -> g.dialog = null; g.mode = Mode.PLAY; d.onClose?.invoke() }
+    val bOpened = g.mode == Mode.BOARD
+    g.mode = Mode.PLAY; g.action(); val bReopen = g.mode == Mode.BOARD && g.dialog == null; g.mode = Mode.PLAY
+    g.quests.clear()
+    val gusQ = Quest("gus", Items.COPPER, 6, Quests.goldFor(Items.COPPER, 6), Quests.FRIEND, Items.COAL, 3, Quests.DAYS)
+    val extraQ = listOf(Quest("pia", Items.produce(0), 3, Quests.goldFor(Items.produce(0), 3), Quests.FRIEND, -1, 0, 3),
+        Quest("mira", 120, 3, Quests.goldFor(120, 3), Quests.FRIEND, -1, 0, 3), Quest("wren", 61, 2, Quests.goldFor(61, 2), Quests.FRIEND, -1, 0, 3))
+    g.quests.add(gusQ); g.quests.addAll(extraQ)
+    val acc = listOf(g.acceptQuest(gusQ), g.acceptQuest(extraQ[0]), g.acceptQuest(extraQ[1]))
+    val fourthRefused = !g.acceptQuest(extraQ[2])
+    g.inv.remove(Items.COPPER, g.inv.count(Items.COPPER))
+    val gus = g.npcs.first { it.key == "gus" }
+    g.warp("town", gus.x, gus.y + 1f, 1); g.mode = Mode.PLAY; g.px = gus.x; g.py = gus.y + 1f; g.dir = 1
+    g.sel = g.inv.slots.indexOfFirst { it?.id == Tool.HOE }
+    g.talkedToday.clear(); g.action()
+    val reminder = g.mode == Mode.DIALOG && g.dialog!!.pages[0].startsWith("Any luck") && g.quests.contains(gusQ)
+    g.dialog = null; g.mode = Mode.PLAY
+    g.give(Items.COPPER, 6, true)
+    val gold0 = g.gold; val fr0 = g.friendship["gus"] ?: 0; val coal0 = g.inv.count(Items.COAL) + g.ranchBox.count(Items.COAL)
+    g.action()
+    val paid = g.gold - gold0; val frGain = (g.friendship["gus"] ?: 0) - fr0; val coalGain = g.inv.count(Items.COAL) + g.ranchBox.count(Items.COAL) - coal0
+    val delivered = paid == gusQ.gold && frGain == Quests.FRIEND && coalGain == 3 && g.inv.count(Items.COPPER) == 0 && !g.quests.contains(gusQ) && g.questsDone == 1
+    g.dialog = null; g.mode = Mode.PLAY
+    // let the other two accepted requests run out over three nights; the board keeps posting fresh notes
+    val wasTip = g.boardTip
+    var lapsedLine = false; var tipLine = false; var postedOk = true
+    repeat(3) {
+        g.endDay(false); g.mode = Mode.PLAY
+        if (g.report.any { it.contains("ran out of time") }) lapsedLine = true
+        if (g.report.any { it.startsWith("NEW: A bulletin board") }) tipLine = true
+        val p = g.postedQuests
+        if (p.size !in 1..Quests.MAX_POSTED || g.quests.map { it.npc }.toSet().size != g.quests.size) postedOk = false
+    }
+    val expiredOk = g.activeQuests.isEmpty() && lapsedLine && (tipLine || wasTip)
+    // balance: every generated request is obtainable, pays more than its sale value and never a huge sum
+    val rq = kotlin.random.Random(11)
+    var balOk = true; var maxGold = 0; var minRatio = 99f
+    for (season in 0..3) for (k in Quests.who.keys) repeat(60) {
+        val q = Quests.make(k, season, rq)
+        val value = Items[q.item].price * q.qty
+        maxGold = maxOf(maxGold, q.gold); minRatio = minOf(minRatio, q.gold.toFloat() / value)
+        if (q.qty < 1 || q.gold <= value || q.gold > 1500 || Items.all[q.item] == null || Quests.text(q).contains("%s")) balOk = false
+        if (Items[q.item].kind == Kind.CROP && Crops.list.first { Items.produce(it.idx) == q.item }.seasons and (1 shl season) == 0) balOk = false
+    }
+    val gridsOk = listOf(Decor.BIN, Decor.BOARD, Decor.FENCE, Decor.CHEST, Decor.ANVIL, Decor.FLOWER, Decor.GIFT, Decor.NOTE_UI, Decor.FOUNTAIN_0, Decor.FOUNTAIN_1, Decor.FOUNTAIN_2)
+        .all { r -> r.all { it.length == r[0].length } }
+    println("board: placed=$boardPlaced posted=$postedAtStart intro=$bIntro opened=$bOpened reopen=$bReopen accepted=$acc fourthRefused=$fourthRefused reminder=$reminder")
+    println("board: delivered=$delivered paid=${paid}g friend=+$frGain coal=+$coalGain expired=$expiredOk postedEachDay=$postedOk balance=$balOk maxGold=$maxGold minPayRatio=${"%.2f".format(minRatio)} grids=$gridsOk")
+    val boardOk = boardPlaced && postedAtStart in 1..Quests.MAX_POSTED && bIntro && bOpened && bReopen && acc.all { it } && fourthRefused && reminder &&
+        delivered && expiredOk && postedOk && balOk && gridsOk
+    println("CHECK board: " + if (boardOk) "PASS" else "FAIL")
+    // accept one for the save roundtrip
+    g.postedQuests.firstOrNull()?.let { g.acceptQuest(it) }
     // save/load roundtrip
     g.save()
     val g2 = Game(f)
     println("loaded cooking: tip=${g2.cookTip} intro=${g2.cookIntro} cooked=${g2.dishesCooked} stove=${g2.areas["house"]!!.o(10, 2) == Ob.STOVE}")
     println("loaded goods: ${g2.areas["farm"]!!.obj.count { it == Ob.GOODS }} (was ${farmA.obj.count { it == Ob.GOODS }}) tip=${g2.goodsIntro}")
     println("loaded fish: caught=${g2.fishCaught} intro=${g2.fishIntro} rod=${g2.hasRod()} (match=${g2.fishCaught == g.fishCaught})")
+    println("loaded board: quests=${g2.quests.size}/${g.quests.size} active=${g2.activeQuests.size}/${g.activeQuests.size} intro=${g2.boardIntro} done=${g2.questsDone} match=${g2.quests.map { it.npc + it.item + it.qty + it.gold } == g.quests.map { it.npc + it.item + it.qty + it.gold }}")
     println("loaded skills: xp=${g2.skillXp.toList() == g.skillXp.toList()} perks=${g2.perks} tip=${g2.skillsTip}")
     // an old save without skill fields still loads, with every skill at 0
-    val old = org.json.JSONObject(f.readText()); for (k in listOf("skills", "perks", "lvlQ", "skillTip")) old.remove(k)
+    val old = org.json.JSONObject(f.readText()); for (k in listOf("skills", "perks", "lvlQ", "skillTip", "quests", "boardTip", "boardIntro", "qDone")) old.remove(k)
     val oldF = File("$out/save_old.json"); oldF.writeText(old.toString())
     val g3 = Game(oldF)
-    println("old save: loaded=${g3.started} skills=${g3.skillXp.toList()} perks=${g3.perks.size} tip=${g3.skillsTip}")
+    println("old save: loaded=${g3.started} skills=${g3.skillXp.toList()} perks=${g3.perks.size} tip=${g3.skillsTip} boardNotes=${g3.postedQuests.size} boardTip=${g3.boardTip}")
     println("loaded: day=${g2.day} gold=${g2.gold} party=${g2.party.size} mode=${g2.mode} crops=${g2.areas["farm"]!!.crops.size}")
     // renders
     renderArea(art, farm, 0, 0, 0, 48, 36, 2, "$out/farm.png")
@@ -551,6 +640,15 @@ fun main(args: Array<String>) {
     val badGrids = Interior.grids.filter { (_, rows) -> rows.any { it.length != rows[0].length } }.keys
     println("interior grids: ${Interior.grids.size} ok=${badGrids.isEmpty()} $badGrids")
     renderHud(art, g, out)
+    // decor sheet (5x) and the plaza close-up with the bulletin board
+    val ds = Sheet(1400, 260); ds.fill(0xFF6CB84A.toInt()); var dx = 10
+    for (b in listOf(art.fountain[0], art.fountain[1], art.board, art.bin, art.box, art.chest, art.anvil, art.fence, art.fence, art.flower[0], art.flower[1], art.flower[2])) {
+        ds.draw(b, dx, 250 - b.height * 5, 5); dx += b.width * 5 + (if (b === art.fence) 0 else 10)
+    }
+    ds.save("$out/decor.png")
+    g.cur = town; g.px = 28.6f; g.py = 15.6f
+    renderArea(art, town, 0, 14, 10, 20, 11, 4, "$out/plaza.png", g)
+    renderBoardMock(g, out)
     // close-up near the house at gameplay zoom
     g.cur = farm; g.px = 12.5f; g.py = 10.5f
     renderArea(art, farm, 0, 4, 2, 20, 12, 5, "$out/farm_close.png", g)

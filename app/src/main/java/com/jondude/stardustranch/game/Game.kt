@@ -59,7 +59,7 @@ class Dialog(val speaker: String?, val pages: List<String>, val options: List<Pa
 
 class PenMon(val mon: Mon, var x: Float, var y: Float) { var tx = x; var ty = y; var t = 0f; var flip = false }
 
-enum class Mode { PLAY, DIALOG, MENU, SHOP, SMITH, RANCH, ELEVATOR, BATTLE, STARTER, REPORT, FISH, COOK, SKILLUP }
+enum class Mode { PLAY, DIALOG, MENU, SHOP, SMITH, RANCH, ELEVATOR, BATTLE, STARTER, REPORT, FISH, COOK, SKILLUP, BOARD }
 
 /** One cast of the fishing rod: wait for a bite, hook it, then the reel dial minigame. */
 class FishingState(val loc: Int, val bx: Int, val by: Int) {
@@ -129,6 +129,11 @@ class Game(val saveFile: File) {
     /** Level-ups waiting to be shown, encoded skill * 100 + level (oldest first). */
     val levelUps = ArrayList<Int>()
     var skillsTip = false
+    // bulletin board requests
+    val quests = ArrayList<Quest>()
+    var boardTip = false     // morning-report announcement shown
+    var boardIntro = false   // first-read explanation at the board shown
+    var questsDone = 0
 
     // ui
     var mode = Mode.STARTER
@@ -198,6 +203,7 @@ class Game(val saveFile: File) {
     init {
         buildWorld()
         if (!load()) newGame()
+        if (quests.isEmpty()) Quests.refresh(quests, season, rng, age = false)
     }
 
     // ======================================================================
@@ -590,6 +596,7 @@ class Game(val saveFile: File) {
             Ob.CHEST -> { openChest(fxT, fyT); return }
             Ob.FOUNTAIN -> { say(null, "Coins glitter at the bottom of the fountain. Someone wished for rain."); return }
             Ob.STOVE -> { openStove(); return }
+            Ob.BOARD -> { openBoard(); return }
             Ob.SHELF -> { say(null, if (cur.id == "house") "Grandma's old farming almanacs. One page is dog-eared: 'Creatures are family, not tools.'" else "Shelves packed with goods."); return }
         }
         if (cur.id == "farm" && fyT == 6 && fxT in 32..34) { mode = Mode.RANCH; menuSel = -1; return }
@@ -602,8 +609,10 @@ class Game(val saveFile: File) {
 
     private fun talk(n: Npc) {
         n.dir = when { abs(px - n.x) > abs(py - n.y) -> if (px > n.x) 3 else 2; else -> if (py > n.y) 0 else 1 }
-        val h = held
         val pts = friendship[n.key] ?: 0
+        val req = quests.firstOrNull { it.accepted && it.npc == n.key }
+        if (req != null && inv.count(req.item) >= req.qty) { deliver(req, n); return }
+        val h = held
         if (h != null && Items[h.id].kind in setOf(Kind.CROP, Kind.FORAGE, Kind.GEM, Kind.FOOD, Kind.FISH, Kind.GOODS) && n.key !in giftedToday) {
             val add = when { h.id in n.loves -> 80; h.id in n.likes -> 45; else -> 20 }
             val name = Items[h.id].name
@@ -615,7 +624,8 @@ class Game(val saveFile: File) {
             return
         }
         if (n.key !in talkedToday) { talkedToday.add(n.key); friendship[n.key] = min(2500, pts + 20) }
-        val line = n.lines[(day + season * 7 + n.key.length) % n.lines.size]
+        val line = if (req != null) "Any luck finding ${req.qty} ${Items[req.item].name}? You have ${inv.count(req.item)} so far. I'll wait - ${req.daysLeft} ${if (req.daysLeft == 1) "day" else "days"} left!"
+            else n.lines[(day + season * 7 + n.key.length) % n.lines.size]
         val opts = when (n.key) {
             "pia" -> listOf("Shop" to { mode = Mode.SHOP; shopSell = false; menuSel = -1 }, "Bye" to {})
             "gus" -> listOf("Upgrade tools" to { mode = Mode.SMITH }, "Bye" to {})
@@ -945,6 +955,44 @@ class Game(val saveFile: File) {
     // Fishing
     // ======================================================================
 
+    // ---------------------------------------------------------------- bulletin board
+
+    private fun openBoard() {
+        if (!boardIntro) {
+            boardIntro = true
+            say(null, "The town bulletin board. Villagers pin notes here when they need something.",
+                "Tap Accept on a note to take the job (up to 3 at once). Then bring the items to that villager and talk to them - they'll pay you gold, warm up to you, and sometimes add a little gift.",
+                "Notes come down after 3 days, and new ones go up most mornings. Check back often!",
+                onClose = { mode = Mode.BOARD; menuSel = -1 })
+            return
+        }
+        mode = Mode.BOARD; menuSel = -1
+    }
+
+    val activeQuests: List<Quest> get() = quests.filter { it.accepted }
+    val postedQuests: List<Quest> get() = quests.filter { !it.accepted }
+
+    fun acceptQuest(q: Quest): Boolean {
+        if (q.accepted || q !in quests) return false
+        if (activeQuests.size >= Quests.MAX_ACTIVE) { note("You already have ${Quests.MAX_ACTIVE} requests. Finish one first!"); return false }
+        q.accepted = true; q.daysLeft = Quests.DAYS
+        toast("Accepted: ${q.qty} ${Items[q.item].name} for ${Quests.who[q.npc]}", 0xFFFFE07A.toInt())
+        return true
+    }
+
+    private fun deliver(q: Quest, n: Npc) {
+        inv.remove(q.item, q.qty)
+        quests.remove(q)
+        questsDone++
+        gold += q.gold
+        friendship[n.key] = min(2500, (friendship[n.key] ?: 0) + q.friend)
+        talkedToday.add(n.key)
+        val extra = if (q.bonus >= 0 && q.bonusN > 0) { give(q.bonus, q.bonusN, true); " and ${q.bonusN} ${Items[q.bonus].name}" } else ""
+        toast("+${q.gold}g", 0xFFFFE07A.toInt())
+        say(n.name, "You brought ${q.qty} ${Items[q.item].name}! That's exactly what I needed. Thank you so much!",
+            "Request complete! Received ${q.gold}g$extra. ${n.name.substringAfterLast(' ')} likes you a little more.", onClose = { checkHeartGift(n) })
+    }
+
     // ---------------------------------------------------------------- cooking
 
     private fun openStove() {
@@ -1154,6 +1202,9 @@ class Game(val saveFile: File) {
             if (r != null) lines.add(r)
         }
         makeGoods(farm, lines)
+        val lapsed = Quests.refresh(quests, season, rng)
+        if (lapsed > 0) lines.add("$lapsed board ${if (lapsed == 1) "request" else "requests"} ran out of time.")
+        if (!boardTip) { boardTip = true; lines.add("NEW: A bulletin board has gone up in the town square, just north-east of the fountain. Villagers pin requests there - accept one, bring the items to them and get paid in gold and friendship.") }
         buff = null
         if (!skillsTip) { skillsTip = true; lines.add("NEW: Skills! Farming, Foraging, Mining, Fishing and Taming now level up from 1 to 10 as you work. Each level gives a small bonus, and at levels 5 and 10 you pick a perk. See the Skills tab in the menu.") }
         if (!cookTip) { cookTip = true; lines.add("NEW: Grandma's old stove in the farmhouse kitchen works again! Face it and press Cook to turn crops, forage and fish into dishes that give energy and a buff.") }
@@ -1297,6 +1348,7 @@ class Game(val saveFile: File) {
             o.put("cookTip", cookTip); o.put("cookIntro", cookIntro); o.put("cooked", dishesCooked)
             o.put("skills", JSONArray(skillXp.toList())); o.put("perks", JSONArray(perks.toList()))
             o.put("lvlQ", JSONArray(levelUps.toList())); o.put("skillTip", skillsTip)
+            o.put("quests", JSONArray().apply { quests.forEach { put(it.toJson()) } }); o.put("boardTip", boardTip); o.put("boardIntro", boardIntro); o.put("qDone", questsDone)
             val f = areas["farm"]!!
             o.put("fg", intsToStr(f.ground)); o.put("fo", intsToStr(f.obj)); o.put("fa", intsToStr(f.aux))
             o.put("fw", f.watered.joinToString("") { if (it) "1" else "0" })
@@ -1335,6 +1387,8 @@ class Game(val saveFile: File) {
             o.optJSONArray("perks")?.let { a -> for (i in 0 until a.length()) a.optString(i).takeIf { it in Skills.byKey }?.let { perks.add(it) } }
             o.optJSONArray("lvlQ")?.let { a -> for (i in 0 until a.length()) levelUps.add(a.optInt(i)) }
             skillsTip = o.optBoolean("skillTip", false)
+            o.optJSONArray("quests")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { Quest.fromJson(it) }?.let { quests.add(it) } }
+            boardTip = o.optBoolean("boardTip", false); boardIntro = o.optBoolean("boardIntro", false); questsDone = o.optInt("qDone", 0)
             val f = areas["farm"]!!
             strToInts(o.getString("fg"), f.ground); strToInts(o.getString("fo"), f.obj); strToInts(o.getString("fa"), f.aux)
             val fw = o.getString("fw"); for (i in f.watered.indices) f.watered[i] = fw.getOrNull(i) == '1'
