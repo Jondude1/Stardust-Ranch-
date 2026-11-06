@@ -5,7 +5,7 @@ package com.jondude.stardustranch.game
 // Everything here is original to Stardust Ranch.
 // ---------------------------------------------------------------------------
 
-enum class Kind { TOOL, SEED, CROP, FORAGE, RESOURCE, ORB, FOOD, PLACE, GEM, FISH }
+enum class Kind { TOOL, SEED, CROP, FORAGE, RESOURCE, ORB, FOOD, PLACE, GEM, FISH, GOODS }
 
 data class ItemDef(
     val id: Int, val name: String, val kind: Kind, val price: Int,
@@ -59,6 +59,8 @@ object Items {
     const val SPRINKLER = 110; const val QSPRINKLER = 111
 
     fun seed(crop: Int) = 10 + crop
+    /** Ranch goods: one per creature type, in EType order (ids 140-149). */
+    fun goodsFor(t: EType) = 140 + t.ordinal
     fun produce(crop: Int) = 30 + crop
 
     init {
@@ -110,6 +112,21 @@ object Items {
         add(ItemDef(SNACK, "Field Snack", Kind.FOOD, 60, 0xFFD9A35A.toInt(), 0xFF8A5A2A.toInt(), "+40 energy, heals lead creature 30.", energy = 40, heal = 30))
         add(ItemDef(TONIC, "Berry Tonic", Kind.FOOD, 150, 0xFFD94A8A.toInt(), 0xFFFFD0E4.toInt(), "Heals your whole party 60.", energy = 10, heal = 60))
         add(ItemDef(FEAST, "Ranch Feast", Kind.FOOD, 300, 0xFFF2B44A.toInt(), 0xFF8A3A2A.toInt(), "+120 energy and full party heal.", energy = 120, heal = 999))
+
+        // ranch goods made by pen creatures (one per type)
+        val goods = listOf(
+            Triple("Soft Fleece", 55, "Shed by happy Wild-type ranch creatures. Cozy and light."),
+            Triple("Honeydew Drop", 60, "Sweet nectar Leaf-type creatures gather from blossoms."),
+            Triple("Warm Cinder", 70, "Still warm. Left behind by Flame-type creatures."),
+            Triple("Tide Pearl", 120, "A smooth pearl brought up by a Tide-type friend."),
+            Triple("Glowstone", 90, "A pebble that glows softly. Stone-types polish them."),
+            Triple("Static Puff", 75, "Crackly fluff from a Spark-type. Don't rub it!"),
+            Triple("Sky Feather", 65, "A light feather shed by Gale-type creatures."),
+            Triple("Dusk Silk", 130, "Shimmering thread spun by Shade-types at night."),
+            Triple("Frost Bloom", 95, "An ice flower that never melts. Made by Frost-types."),
+            Triple("Stardust", 500, "Glittering dust from a creature of the stars.")
+        )
+        for ((i, gd) in goods.withIndex()) add(ItemDef(140 + i, gd.first, Kind.GOODS, gd.second, EType.values()[i].color, 0xFFFFFFFF.toInt(), gd.third, energy = if (i == 1) 30 else 0))
 
         add(ItemDef(SPRINKLER, "Sprinkler", Kind.PLACE, 300, 0xFF8FA6B8.toInt(), 0xFF4A8AD9.toInt(), "Waters the 4 tiles around it each morning."))
         add(ItemDef(QSPRINKLER, "Quality Sprinkler", Kind.PLACE, 900, 0xFFF5C842.toInt(), 0xFF4A8AD9.toInt(), "Waters the 8 tiles around it each morning."))

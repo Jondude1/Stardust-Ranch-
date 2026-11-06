@@ -19,7 +19,8 @@ object Ob {
     const val COUNTER = 19; const val HEALER = 20; const val ELEVATOR = 21; const val LADDER = 22; const val LADDERUP = 23
     const val SPRINKLER = 24; const val QSPRINKLER = 25; const val FLOWER = 26; const val TABLE = 27; const val BOULDER = 28
     const val ANVIL = 29; const val FOUNTAIN = 30; const val SHELF = 31; const val CHEST = 32; const val COALROCK = 33
-    fun walkable(o: Int) = o == NONE || o == TALLGRASS || o == FORAGE || o == FLOWER || o == LADDER || o == LADDERUP
+    const val GOODS = 34 // ranch goods lying in the pen; aux = item id
+    fun walkable(o: Int) = o == NONE || o == TALLGRASS || o == FORAGE || o == FLOWER || o == LADDER || o == LADDERUP || o == GOODS
 }
 
 object Bld { const val HOUSE = 0; const val BARN = 1; const val STORE = 2; const val CENTER = 3; const val COTTAGE = 4; const val SMITHY = 5; const val CAVE = 6 }

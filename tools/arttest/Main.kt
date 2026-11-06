@@ -43,7 +43,7 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
                 Ob.TREE -> art.tree[season]; Ob.PINE -> art.pine[season]; Ob.ROCK -> art.rock; Ob.BOULDER -> art.boulder
                 Ob.COPPER -> art.copperRock; Ob.IRON -> art.ironRock; Ob.GOLD -> art.goldRock; Ob.GEM -> art.gemRock; Ob.COALROCK -> art.coalRock
                 Ob.WEED -> art.weed[season]; Ob.STICK -> art.stick; Ob.BUSH -> art.bush[season]; Ob.TALLGRASS -> art.tallGrass[season]
-                Ob.FORAGE -> art.item(a.aux[i]); Ob.FENCE -> art.fence; Ob.BIN -> art.bin; Ob.BOX -> art.box; Ob.COUNTER -> art.counter
+                Ob.FORAGE, Ob.GOODS -> art.item(a.aux[i]); Ob.FENCE -> art.fence; Ob.BIN -> art.bin; Ob.BOX -> art.box; Ob.COUNTER -> art.counter
                 Ob.HEALER -> art.healer; Ob.ELEVATOR -> art.elevator; Ob.LADDER -> art.ladder; Ob.LADDERUP -> art.ladderUp
                 Ob.FLOWER -> art.flower[a.aux[i] % 3]; Ob.TABLE -> art.table; Ob.ANVIL -> art.anvil; Ob.SHELF -> art.shelf; Ob.CHEST -> art.chest
                 Ob.BED -> if (a.o(x, y - 1) == Ob.BED) null else art.bed
@@ -219,9 +219,28 @@ fun main(args: Array<String>) {
         "Starlit Sturgeon" in lakeNight && "Mossback Catfish" in rainRiver && "Lily Koi" !in winterPond
     println("CHECK fishing: " + if (fishOk) "PASS" else "FAIL")
     g.season = 0; g.raining = false; g.time = 600f
+    // creature goods sim: three ranch creatures with low / high / mid bond, six nights, then pick one up
+    val farmA = g.areas["farm"]!!
+    for (i in farmA.obj.indices) if (farmA.obj[i] == Ob.GOODS) farmA.obj[i] = Ob.NONE
+    g.ranch.clear()
+    g.ranch.add(Mon(33, 10).apply { bond = 10 }); g.ranch.add(Mon(6, 12).apply { bond = 150 }); g.ranch.add(Mon(9, 12).apply { bond = 60 })
+    var introLines = 0; var nightsWithGoods = 0
+    repeat(6) { g.endDay(false); g.mode = Mode.PLAY; introLines += g.report.count { it.startsWith("NEW: Happy ranch") }; if (g.report.any { it.contains("in the pen") }) nightsWithGoods++ }
+    val goodsTiles = farmA.obj.indices.filter { farmA.obj[it] == Ob.GOODS }
+    val kinds = goodsTiles.map { Items[farmA.aux[it]].name }.groupingBy { it }.eachCount()
+    val inPen = goodsTiles.all { it % farmA.w in 29..40 && it / farmA.w in 10..15 }
+    val t0 = goodsTiles.first(); val gid = farmA.aux[t0]; val have0 = g.inv.count(gid) + g.ranchBox.count(gid)
+    g.cur = farmA; g.px = t0 % farmA.w + 0.5f; g.py = t0 / farmA.w - 0.5f; g.dir = 0
+    g.action()
+    val picked = g.inv.count(gid) + g.ranchBox.count(gid) == have0 + 1 && farmA.obj[t0] == Ob.NONE
+    println("goods: nights=$nightsWithGoods/6 intro=$introLines tiles=${goodsTiles.size} inPen=$inPen kinds=$kinds picked=${Items[gid].name}:$picked sell=${Items[gid].sell}g")
+    val goodsOk = introLines == 1 && goodsTiles.size >= 6 && inPen && picked && kinds.size == 3
+    println("CHECK goods: " + if (goodsOk) "PASS" else "FAIL")
+    renderArea(art, farmA, 0, 26, 6, 18, 12, 4, "$out/pen_goods.png")
     // save/load roundtrip
     g.save()
     val g2 = Game(f)
+    println("loaded goods: ${g2.areas["farm"]!!.obj.count { it == Ob.GOODS }} (was ${farmA.obj.count { it == Ob.GOODS }}) tip=${g2.goodsIntro}")
     println("loaded fish: caught=${g2.fishCaught} intro=${g2.fishIntro} rod=${g2.hasRod()} (match=${g2.fishCaught == g.fishCaught})")
     println("loaded: day=${g2.day} gold=${g2.gold} party=${g2.party.size} mode=${g2.mode} crops=${g2.areas["farm"]!!.crops.size}")
     // renders

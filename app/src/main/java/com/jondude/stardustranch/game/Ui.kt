@@ -247,7 +247,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             Ob.TREE -> art.tree[s]; Ob.PINE -> art.pine[s]; Ob.ROCK -> art.rock; Ob.BOULDER -> art.boulder
             Ob.COPPER -> art.copperRock; Ob.IRON -> art.ironRock; Ob.GOLD -> art.goldRock; Ob.GEM -> art.gemRock; Ob.COALROCK -> art.coalRock
             Ob.WEED -> art.weed[s]; Ob.STICK -> art.stick; Ob.BUSH -> art.bush[s]; Ob.TALLGRASS -> art.tallGrass[s]
-            Ob.FORAGE -> art.item(a.aux[i]); Ob.FENCE -> art.fence; Ob.BIN -> art.bin; Ob.BOX -> art.box
+            Ob.FORAGE, Ob.GOODS -> art.item(a.aux[i]); Ob.FENCE -> art.fence; Ob.BIN -> art.bin; Ob.BOX -> art.box
             Ob.COUNTER -> art.counter; Ob.HEALER -> art.healer; Ob.ELEVATOR -> art.elevator; Ob.LADDER -> art.ladder; Ob.LADDERUP -> art.ladderUp
             Ob.SPRINKLER -> art.item(Items.SPRINKLER); Ob.QSPRINKLER -> art.item(Items.QSPRINKLER); Ob.FLOWER -> art.flower[a.aux[i] % 3]
             Ob.TABLE -> art.table; Ob.ANVIL -> art.anvil; Ob.SHELF -> art.shelf; Ob.CHEST -> art.chest
@@ -259,7 +259,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         when (o) {
             Ob.BED -> bmp(c, b, sx, sy)
             Ob.FOUNTAIN -> bmp(c, b, sx, sy - T)
-            Ob.FORAGE -> { val bob = sin(g.frame * 3 + x) * sc; bmp(c, b, sx + T * 0.15f, sy + T * 0.1f + bob, T * 0.7f, T * 0.7f) }
+            Ob.FORAGE, Ob.GOODS -> { val bob = sin(g.frame * 3 + x) * sc; bmp(c, b, sx + T * 0.15f, sy + T * 0.1f + bob, T * 0.7f, T * 0.7f) }
             Ob.TREE, Ob.PINE -> {
                 val behind = abs(g.px - (x + 0.5f)) < b.width / 32f + 0.3f && g.py < y + 0.2f && g.py > y + 1f - b.height / 16f + 0.5f
                 bmp(c, b, sx + (T - bw) / 2, sy + T - bh, p = if (behind) canopyFade else px)
@@ -562,10 +562,10 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val o = g.cur.o(fx, fy)
         val crop = if (g.cur.inb(fx, fy)) g.cur.crops[g.cur.idx(fx, fy)] else null
         val h = g.held
-        if (h != null && h.id == Tool.ROD && crop?.ripe != true && o != Ob.FORAGE && g.canCast()) return "Cast"
+        if (h != null && h.id == Tool.ROD && crop?.ripe != true && o != Ob.FORAGE && o != Ob.GOODS && g.canCast()) return "Cast"
         return when {
             crop?.ripe == true -> "Pick"
-            o == Ob.FORAGE -> "Pick"
+            o == Ob.FORAGE || o == Ob.GOODS -> "Pick"
             o == Ob.BED -> "Sleep"
             o == Ob.BIN -> "Ship"
             o == Ob.LADDER -> "Down"
@@ -911,7 +911,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             button(c, a.right - 130 * u, r.bottom - 34 * u, a.right - 70 * u, r.bottom - 8 * u, "Prev", listOff > 0, size = 11f) { listOff -= perPage }
             button(c, a.right - 64 * u, r.bottom - 34 * u, a.right, r.bottom - 8 * u, "Next", listOff + perPage < g.ranch.size, size = 11f) { listOff += perPage }
         }
-        text(c, "Ranch creatures do their farm job every morning (results go to the Ranch Box).", a.left, r.bottom - 12 * u, 10f, 0xFF6E5A48.toInt())
+        text(c, "Ranch creatures do their farm job every morning (results go to the Ranch Box) and leave goods in the pen - more often the higher their bond.", a.left, r.bottom - 12 * u, 10f, 0xFF6E5A48.toInt())
     }
 
     private fun monRow(c: Canvas, m: Mon, l: Float, t: Float, w: Float, h: Float, act: () -> Unit) {

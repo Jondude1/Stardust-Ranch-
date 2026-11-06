@@ -116,6 +116,7 @@ class Game(val saveFile: File) {
     var started = false
     val fishCaught = HashMap<Int, Int>()
     var fishIntro = false
+    var goodsIntro = false
     var fishing: FishingState? = null
 
     // ui
@@ -169,7 +170,8 @@ class Game(val saveFile: File) {
                 "Each creature has a farm job. Waterers, gardeners, diggers, foragers... find a team you like.",
                 "The creature at the front of your party follows you and lends a hand.",
                 "Some creatures only come out at night. Try the forest after 8pm.",
-                "The fountain here will heal your whole party for free, any time."), Items.STAR_ORB to 1))
+                "The fountain here will heal your whole party for free, any time.",
+                "Creatures living in your ranch pen make little goods overnight when they're happy. The stronger your bond, the more you'll find."), Items.STAR_ORB to 1))
         npcs.add(Npc("gus", "Gus", "town", 30.5f, 7.5f, setOf(Items.GOLD, Items.produce(7)), setOf(Items.COPPER, Items.IRON, Items.COAL),
             listOf("Bring me ore and coin and I'll make your tools sing.", "Copper first, then iron, then gold. That's the way of the forge.",
                 "The mines go a hundred floors deep. Nobody I know has seen the bottom.",
@@ -523,6 +525,7 @@ class Game(val saveFile: File) {
             Ob.LADDERUP -> { warp("mountain", 20.5f, 6.5f, 0); return }
             Ob.ANVIL -> { mode = Mode.SMITH; return }
             Ob.FORAGE -> { pickForage(fxT, fyT); return }
+            Ob.GOODS -> { pickGoods(fxT, fyT); return }
             Ob.CHEST -> { openChest(fxT, fyT); return }
             Ob.FOUNTAIN -> { say(null, "Coins glitter at the bottom of the fountain. Someone wished for rain."); return }
             Ob.SHELF -> { say(null, if (cur.id == "house") "Grandma's old farming almanacs. One page is dog-eared: 'Creatures are family, not tools.'" else "Shelves packed with goods."); return }
@@ -539,7 +542,7 @@ class Game(val saveFile: File) {
         n.dir = when { abs(px - n.x) > abs(py - n.y) -> if (px > n.x) 3 else 2; else -> if (py > n.y) 0 else 1 }
         val h = held
         val pts = friendship[n.key] ?: 0
-        if (h != null && Items[h.id].kind in setOf(Kind.CROP, Kind.FORAGE, Kind.GEM, Kind.FOOD, Kind.FISH) && n.key !in giftedToday) {
+        if (h != null && Items[h.id].kind in setOf(Kind.CROP, Kind.FORAGE, Kind.GEM, Kind.FOOD, Kind.FISH, Kind.GOODS) && n.key !in giftedToday) {
             val add = when { h.id in n.loves -> 80; h.id in n.likes -> 45; else -> 20 }
             val name = Items[h.id].name
             inv.removeAt(sel, 1)
@@ -599,6 +602,12 @@ class Game(val saveFile: File) {
         lead?.let { it.bond++ }
     }
 
+    private fun pickGoods(x: Int, y: Int) {
+        val id = cur.aux[cur.idx(x, y)]
+        cur.setO(x, y, Ob.NONE)
+        give(id, 1)
+    }
+
     private fun openChest(x: Int, y: Int) {
         cur.setO(x, y, Ob.NONE)
         val f = cur.mineFloor
@@ -629,7 +638,7 @@ class Game(val saveFile: File) {
         when (d.kind) {
             Kind.TOOL -> useTool(h.id)
             Kind.SEED -> plant(h)
-            Kind.FOOD, Kind.CROP, Kind.FORAGE, Kind.FISH -> {
+            Kind.FOOD, Kind.CROP, Kind.FORAGE, Kind.FISH, Kind.GOODS -> {
                 if (d.energy <= 0 && d.heal <= 0) { note("You can't eat that."); return }
                 say(null, "Eat the ${d.name}?", options = listOf("Eat" to { eat(h.id) }, "No" to {}))
             }
@@ -1022,6 +1031,7 @@ class Game(val saveFile: File) {
             m.bond++
             if (r != null) lines.add(r)
         }
+        makeGoods(farm, lines)
         // weeds creep back
         repeat(4) {
             val x = rng.nextInt(3, farm.w - 3); val y = rng.nextInt(3, farm.h - 3)
@@ -1041,6 +1051,34 @@ class Game(val saveFile: File) {
         report = lines
         mode = Mode.REPORT
         save()
+    }
+
+    /** Ranch creatures leave goods of their type in the pen overnight; higher bond = more often, sometimes two. */
+    private fun makeGoods(farm: Area, lines: MutableList<String>) {
+        if (ranch.isEmpty()) return
+        var n = 0
+        val existing = farm.obj.count { it == Ob.GOODS }
+        for (m in ranch) {
+            if (existing + n >= 24) break
+            val chance = (0.35f + m.bond / 250f).coerceAtMost(0.9f)
+            if (rng.nextFloat() >= chance) continue
+            val count = if (m.bond >= 120 && rng.nextFloat() < 0.4f) 2 else 1
+            repeat(count) { if (placeGoods(farm, Items.goodsFor(m.sp.type))) n++ }
+        }
+        if (n == 0) return
+        lines.add("Your ranch creatures left $n ${if (n == 1) "gift" else "gifts"} in the pen.")
+        if (!goodsIntro) {
+            goodsIntro = true
+            lines.add("NEW: Happy ranch creatures now make goods - fleece, pearls, glowstones and more, one kind per creature type. The higher their bond, the more often they make them. Walk into the pen and press Pick to collect, then sell or gift them!")
+        }
+    }
+
+    private fun placeGoods(farm: Area, id: Int): Boolean {
+        repeat(40) {
+            val x = rng.nextInt(29, 41); val y = rng.nextInt(10, 16)
+            if (farm.o(x, y) == Ob.NONE && !Gr.solid(farm.g(x, y))) { farm.setO(x, y, Ob.GOODS, id); return true }
+        }
+        return false
     }
 
     private fun doJob(farm: Area, m: Mon, p: Int): String? {
@@ -1130,7 +1168,7 @@ class Game(val saveFile: File) {
             o.put("seen", JSONArray(dexSeen.toList())); o.put("caught", JSONArray(dexCaught.toList()))
             o.put("deepest", deepest); o.put("astral", astralCaught)
             o.put("friends", JSONObject(friendship as Map<*, *>)); o.put("hgifts", JSONArray(heartGifts.toList()))
-            o.put("fish", JSONObject().apply { for ((k, v) in fishCaught) put(k.toString(), v) }); o.put("fishTip", fishIntro)
+            o.put("fish", JSONObject().apply { for ((k, v) in fishCaught) put(k.toString(), v) }); o.put("fishTip", fishIntro); o.put("goodsTip", goodsIntro)
             val f = areas["farm"]!!
             o.put("fg", intsToStr(f.ground)); o.put("fo", intsToStr(f.obj)); o.put("fa", intsToStr(f.aux))
             o.put("fw", f.watered.joinToString("") { if (it) "1" else "0" })
@@ -1163,6 +1201,7 @@ class Game(val saveFile: File) {
             val hg = o.optJSONArray("hgifts"); if (hg != null) for (i in 0 until hg.length()) heartGifts.add(hg.getString(i))
             val fc = o.optJSONObject("fish"); if (fc != null) for (k in fc.keys()) k.toIntOrNull()?.let { fishCaught[it] = fc.optInt(k) }
             fishIntro = o.optBoolean("fishTip", false)
+            goodsIntro = o.optBoolean("goodsTip", false)
             val f = areas["farm"]!!
             strToInts(o.getString("fg"), f.ground); strToInts(o.getString("fo"), f.obj); strToInts(o.getString("fa"), f.aux)
             val fw = o.getString("fw"); for (i in f.watered.indices) f.watered[i] = fw.getOrNull(i) == '1'
