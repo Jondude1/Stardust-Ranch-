@@ -312,6 +312,23 @@ fun main(args: Array<String>) {
     val people = listOf(People.player) + People.npc.values
     for ((pi, fr) in people.withIndex()) for (d in 0..3) is_.draw(fr[d][1], (pi * 4 + d) * 17 * 3, oy, 3)
     is_.save("$out/items.png")
+    // crop field: every crop at every stage in joined rows of watered/dry tilled soil (2 columns of crops, 5 stages each)
+    run {
+        val plot = Area("plot", 13, 16); plot.fillG(0, 0, 13, 16, Gr.GRASS)
+        for (cI in Crops.list.indices) for (st in 0..4) {
+            val x = (cI % 2) * 7 + 1 + st; val y = (cI / 2) * 2 + 2
+            plot.setG(x, y, Gr.TILLED); plot.watered[plot.idx(x, y)] = cI % 4 < 2
+            plot.crops[plot.idx(x, y)] = Crop(cI).apply { days = if (st == 4) def.days else (st * def.days + 3) / 4 }
+        }
+        renderArea(art, plot, 0, 0, 0, 13, 16, 5, "$out/crops.png")
+        // close-up: every crop sprite at 6x on soil (5 stages per row, 13 rows in 2 columns)
+        val cz = Sheet(2 * 5 * 18 * 6, 7 * 34 * 6); cz.fill(0xFF6A4A32.toInt())
+        for (cI in Crops.list.indices) for (st in 0..4) {
+            val b = art.crop(cI, st)
+            cz.draw(b, ((cI % 2) * 5 + st) * 18 * 6, ((cI / 2) * 34 + 32 - b.height) * 6, 6)
+        }
+        cz.save("$out/crops_zoom.png")
+    }
     // big icon sheet (5x) for judging icon detail: every item id in order, 12 per row
     val ic = Sheet(12 * 18 * 5, ((ids.size + 11) / 12) * 18 * 5); ic.fill(0xFFF6E7C4.toInt())
     for ((k, id) in ids.withIndex()) ic.draw(art.item(id), (k % 12) * 18 * 5 + 5, (k / 12) * 18 * 5 + 5, 5)

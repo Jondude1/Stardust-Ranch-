@@ -618,7 +618,11 @@ class Art {
 
     fun crop(type: Int, stage: Int): Bitmap = cropCache.getOrPut(type * 10 + stage) { cropPx(Crops.list[type], stage).bmp() }
 
-    private fun cropPx(d: CropDef, stage: Int): Px {
+    private fun cropPx(d: CropDef, stage: Int): Px = CropArt.crop(d, stage)
+
+    /** Old procedural crop painter, kept as a fallback reference. */
+    @Suppress("unused")
+    private fun cropPxProcedural(d: CropDef, stage: Int): Px {
         val tall = d.tall && stage >= 2
         val p = Px(16, if (tall) 32 else 16)
         val by = p.h - 3
