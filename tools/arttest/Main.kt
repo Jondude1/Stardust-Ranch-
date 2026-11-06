@@ -22,18 +22,15 @@ class Sheet(val w: Int, val h: Int) {
     fun save(p: String) = ImageIO.write(img, "png", File(p))
 }
 
+private var terrainCache: Terrain? = null
+
 fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: Int, s: Int, out: String, g: Game? = null) {
     val T = 16
+    val terrain = terrainCache ?: Terrain(art).also { terrainCache = it }
     val sh = Sheet(tw * T * s, th * T * s); sh.fill(0xFF000000.toInt())
     for (y in y0 until y0 + th) for (x in x0 until x0 + tw) {
         if (!a.inb(x, y)) continue
-        val v = (x * 7 + y * 13) and 3
-        val b = when (a.ground[a.idx(x, y)]) {
-            Gr.GRASS -> art.grass[season][v]; Gr.DIRT -> art.dirt[v]; Gr.TILLED -> if (a.watered[a.idx(x,y)]) art.tilledWet else art.tilledDry
-            Gr.WATER -> art.water[0]; Gr.OCEAN -> art.ocean[0]; Gr.SAND -> art.sand[v]; Gr.CAVE -> art.cave[v]; Gr.WOOD -> art.woodFloor
-            Gr.WALL -> art.caveWall; Gr.COBBLE -> art.cobble[v]; Gr.CLIFF -> art.cliff; Gr.INWALL -> art.inWall; Gr.BRIDGE -> art.bridge[0]
-            else -> null
-        }
+        val b = terrain.tile(a, x, y, season, 0)
         if (b != null) sh.draw(b, (x - x0) * T * s, (y - y0) * T * s, s)
     }
     for (y in y0 until y0 + th + 6) {

@@ -24,6 +24,7 @@ class TouchEv(val action: Int, val id: Int, val x: Float, val y: Float)
 
 /** Draws the world, HUD, menus and battles, and handles touch. Immediate-mode buttons. */
 class Ui(val g: Game, val art: Art, val host: Host) {
+    private val terrain = Terrain(art)
     interface Host { fun installUpdate(r: Updater.Release); fun checkUpdate() }
 
     var W = 1; var H = 1
@@ -173,16 +174,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val wf = ((g.frame * 2f).toInt()) % 3
         val season = g.season
         for (y in y0..y1) for (x in x0..x1) {
-            val gr = a.ground[a.idx(x, y)]
-            val v = (x * 7 + y * 13) and 3
-            val b = when (gr) {
-                Gr.GRASS -> art.grass[season][v]; Gr.DIRT -> art.dirt[v]
-                Gr.TILLED -> if (a.watered[a.idx(x, y)]) art.tilledWet else art.tilledDry
-                Gr.WATER -> art.water[(wf + x) % 3]; Gr.OCEAN -> art.ocean[(wf + x + y) % 3]
-                Gr.SAND -> art.sand[v]; Gr.CAVE -> art.cave[v]; Gr.WOOD -> art.woodFloor; Gr.WALL -> art.caveWall
-                Gr.COBBLE -> art.cobble[v]; Gr.CLIFF -> art.cliff; Gr.INWALL -> art.inWall; Gr.BRIDGE -> art.bridge[(wf + y) % 3]
-                else -> null
-            }
+            val b = terrain.tile(a, x, y, season, wf)
             val sx = x * T - camX; val sy = y * T - camY
             if (b != null) bmp(c, b, sx, sy, T.toFloat(), T.toFloat())
             else { fill.color = Color.BLACK; c.drawRect(sx, sy, sx + T, sy + T, fill) }
