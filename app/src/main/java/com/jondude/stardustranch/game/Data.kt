@@ -5,7 +5,7 @@ package com.jondude.stardustranch.game
 // Everything here is original to Stardust Ranch.
 // ---------------------------------------------------------------------------
 
-enum class Kind { TOOL, SEED, CROP, FORAGE, RESOURCE, ORB, FOOD, PLACE, GEM }
+enum class Kind { TOOL, SEED, CROP, FORAGE, RESOURCE, ORB, FOOD, PLACE, GEM, FISH }
 
 data class ItemDef(
     val id: Int, val name: String, val kind: Kind, val price: Int,
@@ -16,7 +16,7 @@ data class ItemDef(
     val stackable: Boolean get() = kind != Kind.TOOL
 }
 
-object Tool { const val HOE = 0; const val CAN = 1; const val PICK = 2; const val AXE = 3; const val SCYTHE = 4; const val SWORD = 5 }
+object Tool { const val HOE = 0; const val CAN = 1; const val PICK = 2; const val AXE = 3; const val SCYTHE = 4; const val SWORD = 5; const val ROD = 6 }
 
 object Season {
     val names = arrayOf("Spring", "Summer", "Fall", "Winter")
@@ -68,6 +68,8 @@ object Items {
         add(ItemDef(Tool.AXE, "Axe", Kind.TOOL, 0, 0xFF9B6B3F.toInt(), 0xFFB8C4CC.toInt(), "Chops trees and sticks."))
         add(ItemDef(Tool.SCYTHE, "Scythe", Kind.TOOL, 0, 0xFF9B6B3F.toInt(), 0xFFD8DEE2.toInt(), "Cuts grass and weeds, harvests crops."))
         add(ItemDef(Tool.SWORD, "Rusty Sword", Kind.TOOL, 0, 0xFF7A5230.toInt(), 0xFFC8D0D8.toInt(), "Fends off gloops in the mines."))
+        add(ItemDef(Tool.ROD, "Fishing Rod", Kind.TOOL, 500, 0xFF96603A.toInt(), 0xFFC0302A.toInt(), "Face any water and use it to cast. Tap when a fish bites, then tap as the needle crosses the green."))
+        for (f in Fish.list) add(ItemDef(f.id, f.name, Kind.FISH, f.price, f.body, f.fin, f.desc, energy = 8 + f.price / 12))
 
         for (c in Crops.list) {
             add(ItemDef(seed(c.idx), "${c.name} Seeds", Kind.SEED, c.seedPrice, 0xFFC7A876.toInt(), c.color,

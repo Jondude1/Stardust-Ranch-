@@ -664,7 +664,9 @@ class Art {
     // Item icons 16x16
     // =====================================================================
 
-    fun item(id: Int): Bitmap = itemCache.getOrPut(id) { itemPx(Items[id]).bmp() }
+    fun item(id: Int): Bitmap = itemCache.getOrPut(id) { val d = Items[id]; (Icons.cluster(d) ?: Icons.icon(d) ?: itemPx(d)).bmp() }
+    /** Red-and-white float drawn on the water while fishing. */
+    val bobber: Bitmap by lazy { Px.grid(Icons.BOBBER, Icons.BOBBER_PAL).bmp() }
 
     private fun itemPx(d: ItemDef): Px {
         val p = Px(16, 16)

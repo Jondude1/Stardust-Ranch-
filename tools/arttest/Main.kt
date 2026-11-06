@@ -90,6 +90,10 @@ fun main(args: Array<String>) {
     val people = listOf(People.player) + People.npc.values
     for ((pi, fr) in people.withIndex()) for (d in 0..3) is_.draw(fr[d][1], (pi * 4 + d) * 17 * 3, oy, 3)
     is_.save("$out/items.png")
+    // big icon sheet (5x) for judging icon detail: every item id in order, 12 per row
+    val ic = Sheet(12 * 18 * 5, ((ids.size + 11) / 12) * 18 * 5); ic.fill(0xFFF6E7C4.toInt())
+    for ((k, id) in ids.withIndex()) ic.draw(art.item(id), (k % 12) * 18 * 5 + 5, (k / 12) * 18 * 5 + 5, 5)
+    ic.save("$out/icons.png")
     // people sheet: every character, every direction x frame (idle + 4 walk), plus portraits
     val ps = Sheet(20 * 18 * 4, people.size * 34 * 4); ps.fill(0xFF78B45A.toInt())
     for ((pi, fr) in people.withIndex()) for (d in 0..3) for (f in 0..4) ps.draw(fr[d][f], ((d * 5 + f) * 18) * 4, (pi * 34 + 1) * 4, 4)
