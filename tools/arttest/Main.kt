@@ -160,9 +160,55 @@ fun main(args: Array<String>) {
     println("mine rocks=${g.cur.obj.count { it == Ob.ROCK }} gloops=${g.cur.gloops.size} wild=${g.cur.wilds.size}")
     renderArea(art, g.cur, 0, 0, 0, 30, 22, 2, "$out/mine.png", g)
     g.enterMine(45); renderArea(art, g.cur, 0, 0, 0, 30, 22, 2, "$out/mine45.png", g)
+    // fishing sim: beach sign intro, buy a rod from Mira, cast off the pier, hook the bite, reel with timed taps
+    g.gold += 600
+    g.warp("beach", 10.5f, 20.5f, 3)
+    val introShown = g.mode == Mode.DIALOG && g.fishIntro
+    g.dialog = null; g.mode = Mode.PLAY
+    val goldBefore = g.gold
+    g.buyRod(); val rodTalk = g.dialog?.pages?.size ?: 0; g.dialog = null; g.mode = Mode.PLAY
+    println("fishing: intro=$introShown rod=${g.hasRod()} paid=${goldBefore - g.gold} miraPages=$rodTalk")
+    val rr = java.util.Random(7)
+    var casts = 0; var hooked = 0
+    while (casts < 12) {
+        casts++
+        g.px = 10.5f; g.py = 20.5f; g.dir = 3
+        g.sel = g.inv.slots.indexOfFirst { it?.id == Tool.ROD }
+        g.energy = g.maxEnergy.toFloat(); g.time = 600f
+        g.action()
+        if (g.mode != Mode.FISH) { println("fishing: cast failed mode=${g.mode} banner=${g.banner}"); break }
+        var guard = 0
+        while (g.fishing?.phase == 0 && guard++ < 400) g.update(0.05f, 0f, 0f)
+        g.fishTap()
+        if (g.fishing?.phase == 2) hooked++
+        guard = 0
+        while (g.fishing != null && guard++ < 6000) {
+            g.update(0.01f, 0f, 0f)
+            val fs = g.fishing ?: break
+            if (fs.inZone() && rr.nextFloat() < 0.5f) g.fishTap() else if (rr.nextFloat() < 0.0015f) g.fishTap()
+        }
+        if (g.mode == Mode.DIALOG) { g.dialog = null; g.mode = Mode.PLAY }
+    }
+    val landed = g.fishCaught.values.sum()
+    println("fishing: casts=$casts hooked=$hooked landed=$landed species=${g.fishCaught.keys.map { Items[it].name }} inv=${Fish.list.sumOf { g.inv.count(it.id) }}")
+    // fish tables respect place, season, hour and weather
+    g.season = 1; g.raining = false; g.time = 700f
+    val sumDay = (0 until 300).map { g.rollFish(Loc.OCEAN).name }.toSet()
+    g.time = 1300f; g.season = 2
+    val lakeNight = (0 until 300).map { g.rollFish(Loc.LAKE).name }.toSet()
+    g.raining = true; g.time = 800f; g.season = 0
+    val rainRiver = (0 until 300).map { g.rollFish(Loc.RIVER).name }.toSet()
+    g.season = 3; g.raining = false
+    val winterPond = (0 until 300).map { g.rollFish(Loc.POND).name }.toSet()
+    println("fishing tables: summerDayOcean=$sumDay fallNightLake=$lakeNight springRainRiver=$rainRiver winterPond=$winterPond")
+    val fishOk = introShown && g.hasRod() && landed > 0 && hooked > 0 && "Lantern Eel" !in sumDay && "Storm Ray" !in sumDay &&
+        "Starlit Sturgeon" in lakeNight && "Mossback Catfish" in rainRiver && "Lily Koi" !in winterPond
+    println("CHECK fishing: " + if (fishOk) "PASS" else "FAIL")
+    g.season = 0; g.raining = false; g.time = 600f
     // save/load roundtrip
     g.save()
     val g2 = Game(f)
+    println("loaded fish: caught=${g2.fishCaught} intro=${g2.fishIntro} rod=${g2.hasRod()} (match=${g2.fishCaught == g.fishCaught})")
     println("loaded: day=${g2.day} gold=${g2.gold} party=${g2.party.size} mode=${g2.mode} crops=${g2.areas["farm"]!!.crops.size}")
     // renders
     renderArea(art, farm, 0, 0, 0, 48, 36, 2, "$out/farm.png")

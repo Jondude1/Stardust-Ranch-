@@ -77,6 +77,12 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     fun touch(e: TouchEv) {
         val down = e.action == 0 || e.action == 5
         val up = e.action == 1 || e.action == 6 || e.action == 3
+        if (g.mode == Mode.FISH) {
+            // taps land on press for snappy timing; the "Let go" button still works
+            joyId = -1; joyX = 0f; joyY = 0f; aId = -1
+            if (down) { if (fishQuit.contains(e.x, e.y)) g.fishCancel() else g.fishTap() }
+            return
+        }
         if (g.mode != Mode.PLAY) {
             joyId = -1; joyX = 0f; joyY = 0f; aId = -1
             if (up) tapAt(e.x, e.y)
@@ -123,6 +129,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             Mode.PLAY -> { g.mode = Mode.MENU; g.menuSel = -1 }
             Mode.MENU, Mode.SHOP, Mode.SMITH, Mode.RANCH, Mode.ELEVATOR -> g.mode = Mode.PLAY
             Mode.DIALOG -> closeDialog()
+            Mode.FISH -> g.fishCancel()
             else -> {}
         }
     }
@@ -148,6 +155,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
                 Mode.ELEVATOR -> drawElevator(c)
                 Mode.STARTER -> drawStarter(c)
                 Mode.REPORT -> drawReport(c)
+                Mode.FISH -> drawFishing(c)
                 else -> {}
             }
         }
@@ -307,6 +315,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         if (g.swingT > 0 && g.dir == 1) drawSwing(c, sx, sy)
         bmp(c, People.player[g.dir][fr], sx - 8 * sc, sy - 29 * sc)
         if (g.swingT > 0 && g.dir != 1) drawSwing(c, sx, sy)
+        if (g.fishing != null) drawLine(c, sx, sy)
     }
 
     private fun drawSwing(c: Canvas, sx: Float, sy: Float) {
@@ -319,6 +328,92 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         c.rotate((k - 0.5f) * 110f * (if (g.dir == 2) -1 else 1), cx, cy)
         bmp(c, b, cx - T * 0.35f, cy - T * 0.35f, T * 0.7f, T * 0.7f)
         c.restore()
+    }
+
+    /** Fishing line from the rod tip to the bobbing float. */
+    private fun drawLine(c: Canvas, sx: Float, sy: Float) {
+        val f = g.fishing ?: return
+        val (dx, dy) = when (g.dir) { 0 -> 0.15f to 0.1f; 1 -> 0.15f to -1.3f; 2 -> -0.75f to -1.25f; else -> 0.75f to -1.25f }
+        val tipX = sx + dx * T; val tipY = sy + dy * T
+        val bob = if (f.phase == 1) 2.5f * sc else sin(f.anim * 3f) * 0.8f * sc
+        val bx = (f.bx + 0.5f) * T - camX; val by = (f.by + 0.5f) * T - camY + bob
+        // rod
+        stroke.color = 0xFF5A3A22.toInt(); stroke.strokeWidth = 2.2f * sc
+        c.drawLine(sx + dx * T * 0.3f, sy - T * 0.7f, tipX, tipY, stroke)
+        // ripples
+        stroke.strokeWidth = 0.8f * sc
+        for (k in 0..1) {
+            val ph = ((f.anim * 0.8f + k * 0.5f) % 1f)
+            stroke.color = Color.argb(((1f - ph) * (if (f.phase == 1) 230 else 140)).toInt(), 230, 245, 255)
+            val rw = T * (0.25f + ph * 0.45f); c.drawOval(bx - rw, by + 2 * sc - rw * 0.4f, bx + rw, by + 2 * sc + rw * 0.4f, stroke)
+        }
+        // line with a gentle sag
+        stroke.color = 0xCCEFEFF6.toInt(); stroke.strokeWidth = 0.6f * sc
+        val mx = (tipX + bx) / 2; val my = max(tipY, by) + T * 0.25f
+        var lx = tipX; var ly = tipY
+        for (i in 1..10) {
+            val t = i / 10f; val a = 1 - t
+            val nx = a * a * tipX + 2 * a * t * mx + t * t * bx; val ny = a * a * tipY + 2 * a * t * my + t * t * (by - 3 * sc)
+            c.drawLine(lx, ly, nx, ny, stroke); lx = nx; ly = ny
+        }
+        bmp(c, art.bobber, bx - 4 * sc, by - 5 * sc)
+        if (f.phase == 1) {
+            val pop = 1f + sin(f.anim * 30f) * 0.08f
+            panel(c, sx - 14 * u * pop, sy - T * 2.4f - 30 * u * pop, sx + 14 * u * pop, sy - T * 2.4f)
+            text(c, "!", sx, sy - T * 2.4f - 7 * u, 22f, 0xFFC0302A.toInt(), Paint.Align.CENTER)
+        }
+    }
+
+    // ---------------------------------------------------------------- fishing overlay
+
+    private val fishQuit = RectF()
+
+    private fun drawFishing(c: Canvas) {
+        val f = g.fishing ?: return
+        fishQuit.set(W - 110 * u, H - 64 * u, W - 18 * u, H - 30 * u)
+        if (f.phase < 2) {
+            val w = 300 * u; val l = W / 2f - w / 2; val t = H - 120 * u
+            panel(c, l, t, l + w, t + 44 * u)
+            text(c, if (f.phase == 0) "Waiting for a bite... (tap the ! when it appears)" else "A bite! TAP NOW!", W / 2f, t + 28 * u,
+                if (f.phase == 0) 12f else 16f, if (f.phase == 0) INK else 0xFFC0302A.toInt(), Paint.Align.CENTER)
+            button(c, fishQuit.left, fishQuit.top, fishQuit.right, fishQuit.bottom, "Reel in", col = 0xFF9A7A5A.toInt(), size = 12f) {}
+            return
+        }
+        val fish = f.fish ?: return
+        fill.color = 0x60000000; c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), fill)
+        val cx = W / 2f; val cy = H * 0.46f; val R = 78 * u
+        // dial body
+        val shake = if (f.flash > 0 && !f.lastHit) sin(f.flash * 80f) * 4 * u else 0f
+        panel(c, cx - R - 30 * u + shake, cy - R - 52 * u, cx + R + 30 * u + shake, cy + R + 64 * u)
+        text(c, "Reel it in!", cx + shake, cy - R - 28 * u, 16f, 0xFF8E3A1E.toInt(), Paint.Align.CENTER)
+        val ccx = cx + shake
+        fill.color = 0xFF3E5A7A.toInt(); c.drawCircle(ccx, cy, R, fill)
+        fill.color = 0xFF5A86AE.toInt(); c.drawCircle(ccx, cy, R * 0.86f, fill)
+        fill.color = 0x30FFFFFF; c.drawCircle(ccx - R * 0.2f, cy - R * 0.2f, R * 0.6f, fill)
+        // track + green zone
+        val ring = RectF(ccx - R * 0.93f, cy - R * 0.93f, ccx + R * 0.93f, cy + R * 0.93f)
+        stroke.strokeWidth = 12 * u; stroke.color = 0xFF2A3E58.toInt(); c.drawArc(ring, 0f, 360f, false, stroke)
+        stroke.color = if (f.flash > 0 && f.lastHit) 0xFFB8F08A.toInt() else 0xFF5DD45A.toInt()
+        c.drawArc(ring, f.zone - f.zoneW / 2f, f.zoneW, false, stroke)
+        stroke.strokeWidth = 2 * u; stroke.color = 0xFF2E7A2A.toInt()
+        c.drawArc(RectF(ring.left - 6 * u, ring.top - 6 * u, ring.right + 6 * u, ring.bottom + 6 * u), f.zone - f.zoneW / 2f, f.zoneW, false, stroke)
+        // needle
+        val rad = Math.toRadians(f.angle.toDouble())
+        val nx = ccx + (Math.cos(rad) * R * 0.98f).toFloat(); val ny = cy + (Math.sin(rad) * R * 0.98f).toFloat()
+        stroke.strokeWidth = 4 * u; stroke.color = 0xFFF4EEE0.toInt(); c.drawLine(ccx, cy, nx, ny, stroke)
+        stroke.strokeWidth = 2 * u; stroke.color = 0xFFC0302A.toInt(); c.drawLine(ccx, cy, nx, ny, stroke)
+        // hub shows the fish's shadow until it's landed
+        fill.color = 0xFFE8D2A2.toInt(); c.drawCircle(ccx, cy, 24 * u, fill)
+        bmp(c, art.item(fish.id), ccx - 20 * u, cy - 20 * u, 40 * u, 40 * u, sil)
+        // progress pips and line strain
+        val py = cy + R + 20 * u
+        for (i in 0 until f.need) {
+            fill.color = if (i < f.hits) 0xFF5DD45A.toInt() else 0xFFB8A888.toInt()
+            c.drawCircle(cx - (f.need - 1) * 9 * u + i * 18 * u, py, 6 * u, fill)
+        }
+        for (i in 0 until 3) text(c, if (i < f.misses) "✕" else "·", cx - 18 * u + i * 18 * u, py + 26 * u, 14f, if (i < f.misses) 0xFFC0302A.toInt() else 0xFF8A7A62.toInt(), Paint.Align.CENTER)
+        text(c, "Tap anywhere when the needle is in the green", cx, cy + R + 82 * u, 12f, Color.WHITE, Paint.Align.CENTER, true)
+        button(c, fishQuit.left, fishQuit.top, fishQuit.right, fishQuit.bottom, "Let go", col = 0xFF9A7A5A.toInt(), size = 12f) {}
     }
 
     // ---------------------------------------------------------------- HUD
@@ -466,6 +561,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val (fx, fy) = g.facing()
         val o = g.cur.o(fx, fy)
         val crop = if (g.cur.inb(fx, fy)) g.cur.crops[g.cur.idx(fx, fy)] else null
+        val h = g.held
+        if (h != null && h.id == Tool.ROD && crop?.ripe != true && o != Ob.FORAGE && g.canCast()) return "Cast"
         return when {
             crop?.ripe == true -> "Pick"
             o == Ob.FORAGE -> "Pick"
