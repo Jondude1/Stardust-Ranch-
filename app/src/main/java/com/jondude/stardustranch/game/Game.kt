@@ -59,7 +59,7 @@ class Dialog(val speaker: String?, val pages: List<String>, val options: List<Pa
 
 class PenMon(val mon: Mon, var x: Float, var y: Float) { var tx = x; var ty = y; var t = 0f; var flip = false }
 
-enum class Mode { PLAY, DIALOG, MENU, SHOP, SMITH, RANCH, ELEVATOR, BATTLE, STARTER, REPORT, FISH, COOK }
+enum class Mode { PLAY, DIALOG, MENU, SHOP, SMITH, RANCH, ELEVATOR, BATTLE, STARTER, REPORT, FISH, COOK, SKILLUP }
 
 /** One cast of the fishing rod: wait for a bite, hook it, then the reel dial minigame. */
 class FishingState(val loc: Int, val bx: Int, val by: Int) {
@@ -123,6 +123,12 @@ class Game(val saveFile: File) {
     var cookIntro = false    // first-use explanation at the stove shown
     var dishesCooked = 0
     var fishing: FishingState? = null
+    // skills
+    val skillXp = IntArray(Skill.COUNT)
+    val perks = HashSet<String>()
+    /** Level-ups waiting to be shown, encoded skill * 100 + level (oldest first). */
+    val levelUps = ArrayList<Int>()
+    var skillsTip = false
 
     // ui
     var mode = Mode.STARTER
@@ -142,6 +148,52 @@ class Game(val saveFile: File) {
     val lead: Mon? get() = party.firstOrNull { !it.fainted }
     val leadJob: Job? get() = party.firstOrNull()?.let { if (it.fainted) null else it.sp.job }
     val held: Slot? get() = inv.slots[sel]
+
+    // ---------------------------------------------------------------- skills
+    fun skillLv(s: Int) = Skills.levelFor(skillXp[s])
+    fun has(perk: String) = perk in perks
+    /** Bond gain for one bonding event (Bond Keeper doubles it). */
+    fun bondGain(n: Int) = if (has("bondkeeper")) n * 2 else n
+
+    fun addXp(s: Int, n: Int) {
+        if (n <= 0) return
+        val before = skillLv(s)
+        skillXp[s] = min(skillXp[s] + n, Skills.XP[Skills.MAX] + 5000)
+        val after = skillLv(s)
+        for (l in before + 1..after) levelUps.add(s * 100 + l)
+    }
+
+    /** The level-up currently on screen (skill, level), or null. */
+    val pendingLevelUp: Pair<Int, Int>? get() = levelUps.firstOrNull()?.let { (it / 100) to (it % 100) }
+    val pendingNeedsPerk: Boolean get() = pendingLevelUp?.let { (s, l) -> (l == 5 || l == 10) && Skills.choices(s, l).none { it.key in perks } } ?: false
+
+    /** Closes the level-up screen (only allowed once any perk for that level is chosen). */
+    fun dismissLevelUp() {
+        if (pendingNeedsPerk) return
+        if (levelUps.isNotEmpty()) levelUps.removeAt(0)
+        if (levelUps.isEmpty() && mode == Mode.SKILLUP) mode = Mode.PLAY
+    }
+
+    fun choosePerk(key: String) {
+        val (s, l) = pendingLevelUp ?: return
+        val p = Skills.byKey[key] ?: return
+        if (p.skill != s || p.tier != l || !pendingNeedsPerk) return
+        perks.add(key)
+        if (key == "trailblazer") note("Trailblazer: you feel lighter on your feet!")
+        dismissLevelUp()
+    }
+
+    /** Sell / ship price including skill perks. */
+    fun sellPrice(id: Int): Int {
+        val d = Items[id]
+        val m = when {
+            (d.kind == Kind.CROP) && has("market") -> 1.2f
+            d.kind == Kind.FORAGE && has("botanist") -> 1.3f
+            d.kind == Kind.FISH && has("angler") -> 1.25f
+            else -> 1f
+        }
+        return (d.sell * m).toInt()
+    }
 
     init {
         buildWorld()
@@ -250,6 +302,7 @@ class Game(val saveFile: File) {
         if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) banner = null }
         battle?.update(dt)
         if (mode == Mode.FISH) { moving = false; if (tickClock(dt)) updateFishing(dt); return }
+        if (mode == Mode.PLAY && levelUps.isNotEmpty()) mode = Mode.SKILLUP
         if (mode != Mode.PLAY) { moving = false; return }
 
         if (!tickClock(dt)) return
@@ -264,6 +317,7 @@ class Game(val saveFile: File) {
             if (energy <= 0) speed *= 0.6f
             if (leadJob == Job.HARVEST) speed *= 1.1f
             if (buff == Buff.SPEED) speed *= 1.2f
+            if (has("trailblazer")) speed *= 1.1f
             val nx = jx / max(mag, 1f); val ny = jy / max(mag, 1f)
             dir = if (abs(nx) > abs(ny)) (if (nx > 0) 3 else 2) else (if (ny > 0) 0 else 1)
             tryMove(nx * speed * dt, 0f); tryMove(0f, ny * speed * dt)
@@ -583,7 +637,7 @@ class Game(val saveFile: File) {
 
     private fun shipHeld() {
         val h = held
-        if (h == null || Items[h.id].kind == Kind.TOOL) { val total = shipped.sumOf { Items[it.id].sell * it.n }; say(null, "Shipping bin. Hold an item and press Use to ship it.\nShipped today: ${total}g"); return }
+        if (h == null || Items[h.id].kind == Kind.TOOL) { val total = shipped.sumOf { sellPrice(it.id) * it.n }; say(null, "Shipping bin. Hold an item and press Use to ship it.\nShipped today: ${total}g"); return }
         val d = Items[h.id]
         shipped.add(Slot(h.id, h.n))
         toast("Shipped ${h.n} ${d.name}", 0xFFFFE07A.toInt())
@@ -607,8 +661,11 @@ class Game(val saveFile: File) {
         cur.setO(x, y, Ob.NONE)
         var n = if (leadJob == Job.FORAGE) 2 else 1
         if (buff == Buff.LUCK && rng.nextFloat() < 0.5f) n++
+        if (rng.nextFloat() < skillLv(Skill.FORAGE) * 0.04f) n++
+        if (has("gatherer") && rng.nextFloat() < 0.2f) n++
         give(id, n)
-        lead?.let { it.bond++ }
+        addXp(Skill.FORAGE, 7)
+        lead?.let { it.bond += bondGain(1) }
     }
 
     private fun pickGoods(x: Int, y: Int) {
@@ -635,9 +692,11 @@ class Game(val saveFile: File) {
         val d = c.def
         var n = d.yield
         if (leadJob == Job.HARVEST && rng.nextFloat() < 0.35f) n++
+        if (rng.nextFloat() < skillLv(Skill.FARM) * 0.03f) n++
         if (!give(Items.produce(d.idx), n)) {}
+        addXp(Skill.FARM, 4 + Items[Items.produce(d.idx)].sell / 12)
         if (d.regrow > 0) c.days = d.days - d.regrow else cur.crops.remove(i)
-        lead?.let { it.bond++ }
+        lead?.let { it.bond += bondGain(1) }
     }
 
     fun useHeld() {
@@ -683,7 +742,7 @@ class Game(val saveFile: File) {
         val lvl = toolLevel[t]
         when (t) {
             Tool.HOE -> {
-                if (!spend(2f)) return
+                if (!spend(if (has("tiller")) 1f else 2f)) return
                 for (k in 0..lvl) {
                     val x = fx0 + dvx * k; val y = fy0 + dvy * k
                     if (!cur.inb(x, y)) continue
@@ -693,6 +752,7 @@ class Game(val saveFile: File) {
                     val g = cur.g(x, y)
                     if ((g == Gr.GRASS || g == Gr.DIRT) && (o == Ob.NONE || o == Ob.TALLGRASS)) {
                         cur.setO(x, y, Ob.NONE); cur.setG(x, y, Gr.TILLED); if (raining) cur.watered[cur.idx(x, y)] = true
+                        addXp(Skill.FARM, 1)
                     }
                 }
             }
@@ -700,13 +760,18 @@ class Game(val saveFile: File) {
                 if (Gr.isWater(cur.g(fx0, fy0))) { water = waterMax; toast("Refilled!", 0xFF9AD6FF.toInt()); return }
                 if (water <= 0) { note("The watering can is empty. Refill at a pond or river."); return }
                 val freeWater = leadJob == Job.WATER
-                if (!freeWater && !spend(2f)) return
+                if (!freeWater && !spend(if (has("tiller")) 1f else 2f)) return
                 water--
                 val wide = freeWater
+                var wet = 0
                 for (k in 0..lvl) for (s in (if (wide) -1..1 else 0..0)) {
                     val x = fx0 + dvx * k + (if (dvx == 0) s else 0); val y = fy0 + dvy * k + (if (dvy == 0) s else 0)
-                    if (cur.inb(x, y) && cur.g(x, y) == Gr.TILLED) cur.watered[cur.idx(x, y)] = true
+                    if (cur.inb(x, y) && cur.g(x, y) == Gr.TILLED) {
+                        if (!cur.watered[cur.idx(x, y)] && cur.crops[cur.idx(x, y)] != null) wet++
+                        cur.watered[cur.idx(x, y)] = true
+                    }
                 }
+                if (wet > 0) addXp(Skill.FARM, 1)
             }
             Tool.PICK -> {
                 if (!spend(2f)) return
@@ -716,7 +781,7 @@ class Game(val saveFile: File) {
                 when (o) {
                     Ob.ROCK, Ob.COPPER, Ob.IRON, Ob.GOLD, Ob.GEM, Ob.COALROCK, Ob.BOULDER -> {
                         if (o == Ob.BOULDER && lvl < 1) { note("This boulder is too tough. Upgrade your pickaxe."); return }
-                        val power = 1 + lvl + (if (leadJob == Job.MINE) 1 else 0) + (if (buff == Buff.MINING) 1 else 0)
+                        val power = 1 + lvl + (if (leadJob == Job.MINE) 1 else 0) + (if (buff == Buff.MINING) 1 else 0) + (if (has("excavator")) 1 else 0)
                         cur.aux[i] -= power
                         if (cur.aux[i] <= 0) breakRock(x, y, o)
                     }
@@ -731,10 +796,14 @@ class Game(val saveFile: File) {
                 when (o) {
                     Ob.TREE, Ob.PINE -> {
                         if (cur.aux[i] >= 99) { note("This tree is far too big to chop."); return }
-                        cur.aux[i] -= 1 + lvl + (if (leadJob == Job.CLEAR) 1 else 0)
-                        if (cur.aux[i] <= 0) { cur.setO(x, y, Ob.NONE); give(Items.WOOD, rng.nextInt(5, 9)); if (rng.nextFloat() < 0.3f) give(Items.FIBER, 2) }
+                        cur.aux[i] -= 1 + lvl + (if (leadJob == Job.CLEAR) 1 else 0) + (if (has("lumberjack")) 1 else 0)
+                        if (cur.aux[i] <= 0) {
+                            cur.setO(x, y, Ob.NONE); give(Items.WOOD, rng.nextInt(5, 9) + (if (has("lumberjack")) 2 else 0))
+                            if (rng.nextFloat() < 0.3f) give(Items.FIBER, 2)
+                            addXp(Skill.FORAGE, 12)
+                        }
                     }
-                    Ob.STICK -> { cur.setO(x, y, Ob.NONE); give(Items.WOOD, rng.nextInt(1, 3)) }
+                    Ob.STICK -> { cur.setO(x, y, Ob.NONE); give(Items.WOOD, rng.nextInt(1, 3)); addXp(Skill.FORAGE, 2) }
                     Ob.WEED, Ob.BUSH -> if (o == Ob.WEED) cur.setO(x, y, Ob.NONE)
                 }
             }
@@ -759,6 +828,7 @@ class Game(val saveFile: File) {
                 for (g in dead) {
                     cur.gloops.remove(g)
                     give(Items.GEL, rng.nextInt(1, 3))
+                    addXp(Skill.MINE, 4)
                     if (rng.nextFloat() < 0.12f) revealLadderAt(floor(g.x).toInt(), floor(g.y).toInt())
                 }
             }
@@ -768,21 +838,23 @@ class Game(val saveFile: File) {
     private fun breakRock(x: Int, y: Int, o: Int) {
         cur.setO(x, y, Ob.NONE)
         val luck = leadJob == Job.LUCK || leadJob == Job.MINE || buff == Buff.LUCK
+        val bonus = (if (rng.nextFloat() < skillLv(Skill.MINE) * 0.04f) 1 else 0) + (if (has("prospector")) 1 else 0)
+        addXp(Skill.MINE, when (o) { Ob.ROCK -> 3; Ob.BOULDER -> 10; Ob.COALROCK -> 5; Ob.COPPER -> 6; Ob.IRON -> 8; Ob.GOLD -> 10; Ob.GEM -> 12; else -> 2 })
         when (o) {
             Ob.ROCK -> { give(Items.STONE, rng.nextInt(1, 3)); if (cur.mineFloor > 0 && rng.nextFloat() < 0.04f) give(Items.COAL, 1) }
             Ob.BOULDER -> give(Items.STONE, rng.nextInt(10, 16))
-            Ob.COPPER -> give(Items.COPPER, rng.nextInt(1, 4) + (if (luck) 1 else 0))
-            Ob.IRON -> give(Items.IRON, rng.nextInt(1, 4) + (if (luck) 1 else 0))
-            Ob.GOLD -> give(Items.GOLD, rng.nextInt(1, 3) + (if (luck) 1 else 0))
-            Ob.COALROCK -> give(Items.COAL, rng.nextInt(1, 3))
+            Ob.COPPER -> give(Items.COPPER, rng.nextInt(1, 4) + (if (luck) 1 else 0) + bonus)
+            Ob.IRON -> give(Items.IRON, rng.nextInt(1, 4) + (if (luck) 1 else 0) + bonus)
+            Ob.GOLD -> give(Items.GOLD, rng.nextInt(1, 3) + (if (luck) 1 else 0) + bonus)
+            Ob.COALROCK -> give(Items.COAL, rng.nextInt(1, 3) + bonus)
             Ob.GEM -> {
-                val r = rng.nextFloat() - (if (luck) 0.1f else 0f) - cur.mineFloor / 400f
+                val r = rng.nextFloat() - (if (luck) 0.1f else 0f) - cur.mineFloor / 400f - (if (has("geologist")) 0.15f else 0f)
                 give(when { r < 0.05f -> Items.DIAMOND; r < 0.2f -> Items.RUBY; r < 0.5f -> Items.AMETHYST; else -> Items.QUARTZ }, 1)
             }
         }
         if (cur.mineFloor > 0) {
             val rocksLeft = cur.obj.count { it in setOf(Ob.ROCK, Ob.COPPER, Ob.IRON, Ob.GOLD, Ob.GEM, Ob.COALROCK) }
-            val chance = 0.03f + 1.5f / max(rocksLeft, 1) + (if (luck) 0.02f else 0f)
+            val chance = (0.03f + 1.5f / max(rocksLeft, 1) + (if (luck) 0.02f else 0f)) * (if (has("spelunker")) 2f else 1f)
             if (!cur.obj.contains(Ob.LADDER) && rng.nextFloat() < chance) revealLadderAt(x, y)
         }
     }
@@ -836,8 +908,9 @@ class Game(val saveFile: File) {
         val s = inv.slots[i] ?: return
         val d = Items[s.id]
         if (d.kind == Kind.TOOL) return
-        gold += d.sell * s.n
-        toast("+${d.sell * s.n}g", 0xFFFFE07A.toInt())
+        val v = sellPrice(s.id) * s.n
+        gold += v
+        toast("+${v}g", 0xFFFFE07A.toInt())
         inv.slots[i] = null
     }
 
@@ -947,7 +1020,7 @@ class Game(val saveFile: File) {
         mode = Mode.FISH
     }
 
-    private fun biteWait(): Float = (1.4f + rng.nextFloat() * 3.6f) * (if (lead?.sp?.type == EType.TIDE) 0.7f else 1f) * (if (buff == Buff.LUCK) 0.7f else 1f)
+    private fun biteWait(): Float = (1.4f + rng.nextFloat() * 3.6f) * (if (lead?.sp?.type == EType.TIDE) 0.7f else 1f) * (if (buff == Buff.LUCK) 0.7f else 1f) * (if (has("luremaster")) 0.6f else 1f)
 
     /** Picks a fish that lives here right now (location, season, hour, weather), weighted by rarity. */
     fun rollFish(loc: Int): FishDef {
@@ -978,8 +1051,8 @@ class Game(val saveFile: File) {
                 val fish = rollFish(f.loc)
                 f.fish = fish; f.phase = 2
                 f.speed = 150f + fish.diff * 190f
-                f.zoneW = 74f - fish.diff * 38f + (if (lead?.sp?.type == EType.TIDE) 12f else 0f)
-                f.need = 3 + (fish.diff * 2.6f).toInt()
+                f.zoneW = 74f - fish.diff * 38f + (if (lead?.sp?.type == EType.TIDE) 12f else 0f) + skillLv(Skill.FISH) * 1.5f + (if (has("steady")) 14f else 0f)
+                f.need = max(2, 3 + (fish.diff * 2.6f).toInt() - (if (has("quickreel")) 1 else 0))
                 f.zone = rng.nextFloat() * 360f
                 f.angle = (f.zone + 180f) % 360f
             }
@@ -1009,7 +1082,8 @@ class Game(val saveFile: File) {
         give(fish.id, 1, true)
         val first = (fishCaught[fish.id] ?: 0) == 0
         fishCaught[fish.id] = (fishCaught[fish.id] ?: 0) + 1
-        lead?.let { it.bond++ }
+        addXp(Skill.FISH, 8 + (fish.diff * 30f).toInt())
+        lead?.let { it.bond += bondGain(1) }
         toast("+1 ${fish.name}", 0xFF9AD6FF.toInt())
         if (first) say(null, "You caught a ${fish.name}! It's your first one.", "${fish.desc} Sells for ${fish.price}g. (Fish species found: ${fishCaught.size}/${Fish.list.size})")
         else note("Caught a ${fish.name}!")
@@ -1041,7 +1115,7 @@ class Game(val saveFile: File) {
         extra?.let { lines.add(it) }
         // shipping
         var total = 0
-        for (s in shipped) total += Items[s.id].sell * s.n
+        for (s in shipped) total += sellPrice(s.id) * s.n
         shipped.clear()
         if (total > 0) { gold += total; lines.add("Shipping earned ${total}g.") }
 
@@ -1049,7 +1123,7 @@ class Game(val saveFile: File) {
         // crop growth
         val newSeason = day == 28
         for ((i, c) in farm.crops.entries) {
-            if (farm.watered[i] || raining) c.days++
+            if (farm.watered[i] || raining) { c.days++; if (has("greenthumb") && !c.ripe && rng.nextFloat() < 0.2f) c.days++ }
         }
         // advance date
         day++
@@ -1076,11 +1150,12 @@ class Game(val saveFile: File) {
         val helpers = ranch.map { it to it.jobPower } + listOfNotNull(lead?.let { it to max(1, it.jobPower / 2) })
         for ((m, p) in helpers) {
             val r = doJob(farm, m, p)
-            m.bond++
+            m.bond += bondGain(1)
             if (r != null) lines.add(r)
         }
         makeGoods(farm, lines)
         buff = null
+        if (!skillsTip) { skillsTip = true; lines.add("NEW: Skills! Farming, Foraging, Mining, Fishing and Taming now level up from 1 to 10 as you work. Each level gives a small bonus, and at levels 5 and 10 you pick a perk. See the Skills tab in the menu.") }
         if (!cookTip) { cookTip = true; lines.add("NEW: Grandma's old stove in the farmhouse kitchen works again! Face it and press Cook to turn crops, forage and fish into dishes that give energy and a buff.") }
         // weeds creep back
         repeat(4) {
@@ -1110,7 +1185,7 @@ class Game(val saveFile: File) {
         val existing = farm.obj.count { it == Ob.GOODS }
         for (m in ranch) {
             if (existing + n >= 24) break
-            val chance = (0.35f + m.bond / 250f).coerceAtMost(0.9f)
+            val chance = (0.35f + m.bond / 250f + (if (has("rancher")) 0.15f else 0f)).coerceAtMost(0.95f)
             if (rng.nextFloat() >= chance) continue
             val count = if (m.bond >= 120 && rng.nextFloat() < 0.4f) 2 else 1
             repeat(count) { if (placeGoods(farm, Items.goodsFor(m.sp.type))) n++ }
@@ -1220,6 +1295,8 @@ class Game(val saveFile: File) {
             o.put("friends", JSONObject(friendship as Map<*, *>)); o.put("hgifts", JSONArray(heartGifts.toList()))
             o.put("fish", JSONObject().apply { for ((k, v) in fishCaught) put(k.toString(), v) }); o.put("fishTip", fishIntro); o.put("goodsTip", goodsIntro)
             o.put("cookTip", cookTip); o.put("cookIntro", cookIntro); o.put("cooked", dishesCooked)
+            o.put("skills", JSONArray(skillXp.toList())); o.put("perks", JSONArray(perks.toList()))
+            o.put("lvlQ", JSONArray(levelUps.toList())); o.put("skillTip", skillsTip)
             val f = areas["farm"]!!
             o.put("fg", intsToStr(f.ground)); o.put("fo", intsToStr(f.obj)); o.put("fa", intsToStr(f.aux))
             o.put("fw", f.watered.joinToString("") { if (it) "1" else "0" })
@@ -1254,6 +1331,10 @@ class Game(val saveFile: File) {
             fishIntro = o.optBoolean("fishTip", false)
             goodsIntro = o.optBoolean("goodsTip", false)
             cookTip = o.optBoolean("cookTip", false); cookIntro = o.optBoolean("cookIntro", false); dishesCooked = o.optInt("cooked", 0)
+            o.optJSONArray("skills")?.let { a -> for (i in 0 until min(Skill.COUNT, a.length())) skillXp[i] = a.optInt(i) }
+            o.optJSONArray("perks")?.let { a -> for (i in 0 until a.length()) a.optString(i).takeIf { it in Skills.byKey }?.let { perks.add(it) } }
+            o.optJSONArray("lvlQ")?.let { a -> for (i in 0 until a.length()) levelUps.add(a.optInt(i)) }
+            skillsTip = o.optBoolean("skillTip", false)
             val f = areas["farm"]!!
             strToInts(o.getString("fg"), f.ground); strToInts(o.getString("fo"), f.obj); strToInts(o.getString("fa"), f.aux)
             val fw = o.getString("fw"); for (i in f.watered.indices) f.watered[i] = fw.getOrNull(i) == '1'

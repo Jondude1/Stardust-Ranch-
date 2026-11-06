@@ -102,7 +102,8 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
         val mult = TypeChart.mult(mv.type, def.sp.type)
         val stab = if (mv.type == att.sp.type) 1.25f else 1f
         val base = ((2f * att.level / 5f + 2f) * mv.power * att.atk / max(1, def.def)) / 40f + 2f
-        val dmg = (base * mult * stab * (0.85f + rng.nextFloat() * 0.15f)).toInt()
+        val champ = if (att !== wild && game.has("champion")) 1.1f else 1f
+        val dmg = (base * mult * stab * champ * (0.85f + rng.nextFloat() * 0.15f)).toInt()
         return max(1, dmg) to mult
     }
 
@@ -154,13 +155,14 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
     private fun checkWildFaint(): Boolean {
         if (!wild.fainted) return false
         msgs.add("Wild ${wild.name} fainted!")
-        val xp = (wild.level * (if (boss) 40 else 14) * (1f + wild.sp.hp / 100f)).toInt()
+        val xp = (wild.level * (if (boss) 40 else 14) * (1f + wild.sp.hp / 100f) * (if (game.has("trainer")) 1.25f else 1f)).toInt()
+        game.addXp(Skill.TAME, 6 + wild.level / 2 + (if (boss) 40 else 0))
         for (i in participants) {
             val m = game.party.getOrNull(i) ?: continue
             if (m.fainted) continue
             val share = if (i == activeIdx) xp else xp / 2
             msgs.add("${m.name} gained $share XP.")
-            m.bond += 2
+            m.bond += game.bondGain(2)
             msgs.addAll(m.gainXp(share))
             game.dexSeen.add(m.speciesId); game.dexCaught.add(m.speciesId)
         }
@@ -206,6 +208,7 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
         val power = Items[orbId].orbPower
         val hpFactor = 1f - 0.75f * wild.hp.toFloat() / wild.maxHp
         var chance = wild.sp.catchRate * power * (0.35f + hpFactor * 1.4f)
+        chance *= (1f + game.skillLv(Skill.TAME) * 0.02f) * (if (game.has("gentle")) 1.15f else 1f)
         if (game.party.size + game.ranch.size == 0) chance = 1f
         chance = chance.coerceIn(0.02f, 0.98f)
         orbAnim = 1.6f
@@ -219,6 +222,7 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
             msgs.add("Gotcha! ${wild.sp.name} was caught!")
             msgs.add("You named it ${wild.nick}.")
             game.dexCaught.add(wild.speciesId)
+            game.addXp(Skill.TAME, 20 + wild.level)
             if (game.party.size < 6) {
                 game.party.add(wild); msgs.add("${wild.name} joined your party.")
             } else {

@@ -75,6 +75,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     private val barCache = HashMap<Int, IntArray>()
     private val roundCache = HashMap<String, Bitmap>()
     private var cookPick = 0
+    private val iSkill = Array(Skill.COUNT) { Skills.icon(it).bmp() }
 
     private val CREAM = 0xFFF6E7C4.toInt()
     private val INK = 0xFF3A2416.toInt()
@@ -152,6 +153,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             Mode.MENU, Mode.SHOP, Mode.SMITH, Mode.RANCH, Mode.ELEVATOR, Mode.COOK -> g.mode = Mode.PLAY
             Mode.DIALOG -> closeDialog()
             Mode.FISH -> g.fishCancel()
+            Mode.SKILLUP -> g.dismissLevelUp()
             else -> {}
         }
     }
@@ -179,6 +181,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
                 Mode.REPORT -> drawReport(c)
                 Mode.FISH -> drawFishing(c)
                 Mode.COOK -> drawCook(c)
+                Mode.SKILLUP -> drawSkillUp(c)
                 else -> {}
             }
         }
@@ -737,7 +740,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     // ---------------------------------------------------------------- menu
 
-    private val tabs = listOf("Items", "Party", "Craft", "Dex", "Friends", "Options")
+    private val tabs = listOf("Items", "Party", "Craft", "Dex", "Friends", "Skills", "Options")
 
     private fun drawMenu(c: Canvas) {
         val r = overlay(c, "")
@@ -757,7 +760,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             2 -> drawCraftTab(c, area)
             3 -> drawDexTab(c, area)
             4 -> drawFriendsTab(c, area)
-            5 -> drawOptionsTab(c, area)
+            5 -> drawSkillsTab(c, area)
+            6 -> drawOptionsTab(c, area)
         }
     }
 
@@ -788,7 +792,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             val d = Items[s.id]
             bmp(c, art.item(s.id), ix, a.top, 48 * u, 48 * u)
             text(c, d.name, ix + 56 * u, a.top + 20 * u, 15f)
-            text(c, if (d.kind == Kind.TOOL) "${g.levelName(g.toolLevel[s.id])} tool" else "Sells for ${d.sell}g", ix + 56 * u, a.top + 40 * u, 11f, 0xFF6E5A48.toInt())
+            text(c, if (d.kind == Kind.TOOL) "${g.levelName(g.toolLevel[s.id])} tool" else "Sells for ${g.sellPrice(s.id)}g", ix + 56 * u, a.top + 40 * u, 11f, 0xFF6E5A48.toInt())
             var y = a.top + 72 * u
             for (line in wrap(d.desc, a.right - ix, 12f)) { text(c, line, ix, y, 12f); y += 17 * u }
             if (d.energy > 0 || d.heal > 0) button(c, ix, y + 6 * u, ix + 90 * u, y + 36 * u, "Eat") {
@@ -923,6 +927,100 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         for (h in help) for (line in wrap(h, a.width(), 11f)) { text(c, line, a.left, y, 11f, 0xFF6E5A48.toInt()); y += 15 * u }
     }
 
+    // ---------------------------------------------------------------- skills
+
+    private fun drawSkillsTab(c: Canvas, a: RectF) {
+        val rowH = min((a.height() - 20 * u) / Skill.COUNT, 52 * u)
+        for (s in 0 until Skill.COUNT) {
+            val y = a.top + s * rowH
+            rowBg(c, a.left, y + 2 * u, a.right, y + rowH - 2 * u)
+            val ib = iSkill[s]; val isz = max(1, Math.round((rowH - 12 * u) / ib.height))
+            icon(c, ib, a.left + 8 * u, y + (rowH - ib.height * isz) / 2, isz)
+            val lv = g.skillLv(s)
+            val nx = a.left + 16 * u + ib.width * isz
+            text(c, Skill.names[s], nx, y + rowH * 0.42f, 14f, Skill.colors[s])
+            text(c, "Level $lv", nx, y + rowH * 0.80f, 11f, INK)
+            // level pips
+            val px0 = nx + 74 * u; val pw = 9 * u
+            for (k in 0 until Skills.MAX) {
+                val lx = px0 + k * (pw + 3 * u)
+                rectS(c, lx, y + rowH * 0.22f, lx + pw, y + rowH * 0.22f + pw, 0xFF2A1A16.toInt())
+                rectS(c, lx + hs * 0.5f, y + rowH * 0.22f + hs * 0.5f, lx + pw - hs * 0.5f, y + rowH * 0.22f + pw - hs * 0.5f,
+                    if (k < lv) (if (k == 4 || k == 9) GOLD else Skill.colors[s]) else 0xFF5A463C.toInt())
+            }
+            val xp = g.skillXp[s]
+            val barL = px0; val barR = px0 + Skills.MAX * (pw + 3 * u) - 3 * u
+            if (lv < Skills.MAX) {
+                val f = (xp - Skills.XP[lv]).toFloat() / (Skills.XP[lv + 1] - Skills.XP[lv])
+                bar(c, barL, y + rowH * 0.56f, barR, y + rowH * 0.56f + 8 * u, f, Skill.colors[s])
+                text(c, "${xp - Skills.XP[lv]}/${Skills.XP[lv + 1] - Skills.XP[lv]} XP", barR + 8 * u, y + rowH * 0.56f + 8 * u, 10f, 0xFF6E5A48.toInt())
+            } else text(c, "Mastered!", barL, y + rowH * 0.56f + 8 * u, 11f, 0xFF8A6A12.toInt())
+            val rx = barR + 90 * u
+            val chosen = Skills.perks.filter { it.skill == s && it.key in g.perks }
+            if (chosen.isEmpty()) {
+                for ((i, line) in wrap(Skill.howToEarn[s] + ".", a.right - rx - 8 * u, 10f).take(2).withIndex())
+                    text(c, line, rx, y + rowH * 0.42f + i * 14 * u, 10f, 0xFF6E5A48.toInt())
+            } else for ((i, p) in chosen.withIndex()) {
+                text(c, "★ ${p.name}", rx, y + rowH * 0.40f + i * 15 * u, 11f, 0xFF3E7A2A.toInt())
+            }
+        }
+        text(c, "Skills grow as you farm, forage, mine, fish and battle. Every level helps a little; at levels 5 and 10 you choose a perk.", a.left, a.bottom - 4 * u, 10f, 0xFF6E5A48.toInt())
+    }
+
+    private fun drawSkillUp(c: Canvas) {
+        val (s, lv) = g.pendingLevelUp ?: run { g.mode = Mode.PLAY; return }
+        fill.color = 0xA0000000.toInt(); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), fill)
+        btn(0f, 0f, W.toFloat(), H.toFloat()) {} // swallow
+        val w = min(W * 0.82f, 620 * u); val h = min(H * 0.86f, 300 * u)
+        val l = (W - w) / 2; val t = (H - h) / 2
+        panel(c, l, t, l + w, t + h)
+        // rays behind the icon
+        val ib = iSkill[s]; val isz = hs * 2
+        val icx = l + 30 * u + ib.width * isz / 2f; val icy = t + 30 * u + ib.height * isz / 2f
+        val spin = g.frame * 0.6f
+        solid.color = (Skill.colors[s] and 0x00FFFFFF) or 0x50000000
+        for (k in 0 until 8) {
+            val ang = spin + k * Math.PI.toFloat() / 4
+            val r1 = ib.width * isz * 0.95f
+            c.save(); c.rotate(Math.toDegrees(ang.toDouble()).toFloat(), icx, icy)
+            c.drawRect(icx - 3 * u, icy - r1, icx + 3 * u, icy - r1 * 0.55f, solid)
+            c.restore()
+        }
+        icon(c, ib, icx - ib.width * isz / 2f, icy - ib.height * isz / 2f, isz)
+        val tx = l + 48 * u + ib.width * isz
+        text(c, "Level up!", tx, t + 38 * u, 13f, 0xFF8E3A1E.toInt())
+        text(c, "${Skill.names[s]} Level $lv", tx, t + 64 * u, 22f, Skill.colors[s], shadow = false)
+        for (k in 0 until Skills.MAX) {
+            val lx = tx + k * 15 * u
+            rectS(c, lx, t + 74 * u, lx + 12 * u, t + 86 * u, 0xFF2A1A16.toInt())
+            rectS(c, lx + 2 * u, t + 76 * u, lx + 10 * u, t + 84 * u, if (k < lv) (if (k == 4 || k == 9) GOLD else Skill.colors[s]) else 0xFF5A463C.toInt())
+        }
+        var y = t + 116 * u
+        text(c, "Bonus: " + Skill.perLevel[s].replaceFirstChar { it.lowercase() } + ".", l + 26 * u, y, 13f, 0xFF3E7A2A.toInt())
+        y += 18 * u
+        if (g.pendingNeedsPerk) {
+            text(c, "Choose a perk (this choice is permanent):", l + 26 * u, y, 13f)
+            y += 10 * u
+            val opts = Skills.choices(s, lv)
+            val cw = (w - 52 * u - 14 * u) / 2; val chH = t + h - 20 * u - y
+            for ((i, p) in opts.withIndex()) {
+                val cx = l + 26 * u + i * (cw + 14 * u)
+                rowBg(c, cx, y, cx + cw, y + chH)
+                text(c, "★ ${p.name}", cx + 14 * u, y + 28 * u, 16f, 0xFF8E3A1E.toInt())
+                var ly = y + 50 * u
+                for (line in wrap(p.desc, cw - 28 * u, 12f)) { text(c, line, cx + 14 * u, ly, 12f); ly += 17 * u }
+                button(c, cx + cw - 104 * u, y + chH - 40 * u, cx + cw - 12 * u, y + chH - 10 * u, "Choose", size = 12f) { g.choosePerk(p.key) }
+            }
+        } else {
+            for (line in wrap(when {
+                lv < 5 -> "At level 5 you'll choose your first ${Skill.names[s]} perk."
+                lv < 10 -> "At level 10 you'll choose a master ${Skill.names[s]} perk."
+                else -> "You've mastered ${Skill.names[s]}!"
+            } + " Track all your skills in Menu → Skills.", w - 52 * u, 12f)) { text(c, line, l + 26 * u, y + 6 * u, 12f, 0xFF6E5A48.toInt()); y += 17 * u }
+            button(c, l + w - 150 * u, t + h - 56 * u, l + w - 24 * u, t + h - 20 * u, "Great!", size = 14f) { g.dismissLevelUp() }
+        }
+    }
+
     // ---------------------------------------------------------------- kitchen (cooking)
 
     private fun drawCook(c: Canvas) {
@@ -1004,7 +1102,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             if (s != null) {
                 val d = Items[s.id]
                 text(c, d.name, ix, a.top + 20 * u, 15f)
-                text(c, "${s.n} × ${d.sell}g = ${s.n * d.sell}g", ix, a.top + 42 * u, 13f, 0xFF8A6A12.toInt())
+                text(c, "${s.n} × ${g.sellPrice(s.id)}g = ${s.n * g.sellPrice(s.id)}g", ix, a.top + 42 * u, 13f, 0xFF8A6A12.toInt())
                 button(c, ix, a.top + 56 * u, ix + 110 * u, a.top + 88 * u, "Sell all") { g.sellSlot(g.menuSel); g.menuSel = -1 }
             } else text(c, "Tap an item to sell it.", ix, a.top + 20 * u, 12f)
         }

@@ -219,6 +219,51 @@ fun renderHud(art: Art, g: Game, out: String) {
     ks.nine(Hud.button(0xFF5DA342.toInt()), Hud.BUTTON_K, dx, bt, dx + 120 * u, bt + 34 * u, hs, false)
     ks.text("Cook", dx + 60 * u, bt + 21 * u, 28, 0xFFFFFFFF.toInt(), true, true)
     ks.save("$out/kitchen.png")
+
+    // level-up screen mock (Ui.drawSkillUp) for Fishing level 5 with its two perk cards, plus all skill icons
+    val sk = Sheet(1280, 720); sk.img.graphics.drawImage(bg.img, 0, -24, null); sk.rect(0, 0, 1280, 720, 0xA0000000.toInt())
+    val sw = minOf((1280 * 0.82f).toInt(), 620 * u); val sh2 = minOf((720 * 0.86f).toInt(), 300 * u)
+    val sl = (1280 - sw) / 2; val st = (720 - sh2) / 2; val sS = Skill.FISH; val sLv = 5
+    sk.nine(Hud.panel(), Hud.PANEL_K, sl, st, sl + sw, st + sh2, hs)
+    val isz = hs * 2; val icx = sl + 30 * u + 6 * isz; val icy = st + 30 * u + 6 * isz
+    for (k in 0 until 8) {
+        val a = k * Math.PI / 4; val r1 = 12 * isz * 0.95; val r0 = r1 * 0.55
+        for (rr in r0.toInt()..r1.toInt()) for (w in -3 * u..3 * u) {
+            val x = icx + (Math.sin(a) * rr + Math.cos(a) * w).toInt(); val y = icy - (Math.cos(a) * rr - Math.sin(a) * w).toInt()
+            sk.blend(x, y, (Skill.colors[sS] and 0x00FFFFFF) or 0x50000000)
+        }
+    }
+    sk.px(Skills.icon(sS), icx - 6 * isz, icy - 6 * isz, isz)
+    val tx = sl + 48 * u + 12 * isz
+    sk.text("Level up!", tx, st + 38 * u, 26, 0xFF8E3A1E.toInt())
+    sk.text("${Skill.names[sS]} Level $sLv", tx, st + 64 * u, 44, Skill.colors[sS])
+    for (k in 0 until Skills.MAX) { val lx = tx + k * 15 * u; sk.rect(lx, st + 74 * u, lx + 12 * u, st + 86 * u, 0xFF2A1A16.toInt()); sk.rect(lx + 2 * u, st + 76 * u, lx + 10 * u, st + 84 * u, if (k < sLv) (if (k == 4) 0xFFF2C842.toInt() else Skill.colors[sS]) else 0xFF5A463C.toInt()) }
+    var yy = st + 116 * u
+    sk.text("Bonus: " + Skill.perLevel[sS].replaceFirstChar { it.lowercase() } + ".", sl + 26 * u, yy, 26, 0xFF3E7A2A.toInt()); yy += 18 * u
+    sk.text("Choose a perk (this choice is permanent):", sl + 26 * u, yy, 26, INK); yy += 10 * u
+    val cw = (sw - 66 * u) / 2; val chH = st + sh2 - 20 * u - yy
+    for ((i, pk) in Skills.choices(sS, sLv).withIndex()) {
+        val cx = sl + 26 * u + i * (cw + 14 * u)
+        sk.nine(Hud.row(false), Hud.ROW_K, cx, yy, cx + cw, yy + chH, hs, false)
+        sk.text("★ ${pk.name}", cx + 14 * u, yy + 28 * u, 32, 0xFF8E3A1E.toInt())
+        sk.text(pk.desc, cx + 14 * u, yy + 50 * u, 22, INK)
+        sk.nine(Hud.button(0xFF5DA342.toInt()), Hud.BUTTON_K, cx + cw - 104 * u, yy + chH - 40 * u, cx + cw - 12 * u, yy + chH - 10 * u, hs, false)
+        sk.text("Choose", cx + cw - 58 * u, yy + chH - 19 * u, 24, 0xFFFFFFFF.toInt(), true, true)
+    }
+    for (k in 0 until Skill.COUNT) sk.px(Skills.icon(k), 20 + k * 110, 600, 8)
+    sk.save("$out/skillup.png")
+}
+
+/** Resolves every pending skill level-up like a player would (first perk when a choice is required). */
+fun drainLevelUps(g: Game): Int {
+    var n = 0
+    while (g.levelUps.isNotEmpty() && n < 100) {
+        val (s, l) = g.pendingLevelUp!!
+        if (g.pendingNeedsPerk) g.choosePerk(Skills.choices(s, l).first().key) else g.dismissLevelUp()
+        n++
+    }
+    if (g.mode == Mode.SKILLUP) g.mode = Mode.PLAY
+    return n
 }
 
 fun main(args: Array<String>) {
@@ -417,6 +462,7 @@ fun main(args: Array<String>) {
     // stamina halves tool energy; speed makes you walk further
     g.buff = Buff.STAMINA; g.buffUntil = g.time + 60; val e0 = g.energy; g.action(); val stamCost = e0 - g.energy
     g.warp("farm", 20.5f, 20.5f, 0); g.mode = Mode.PLAY
+    drainLevelUps(g)
     for (x in 18..28) for (y in 19..22) { g.cur.setO(x, y, Ob.NONE); g.cur.crops.remove(g.cur.idx(x, y)); if (g.cur.g(x, y) != Gr.GRASS) g.cur.setG(x, y, Gr.GRASS) }
     g.buff = null; val x0 = g.px; repeat(10) { g.update(0.05f, 1f, 0f) }; val plain = g.px - x0
     g.px = 20.5f; g.py = 20.5f; g.buff = Buff.SPEED; g.buffUntil = g.time + 60; val x1 = g.px; repeat(10) { g.update(0.05f, 1f, 0f) }; val fast = g.px - x1
@@ -429,12 +475,67 @@ fun main(args: Array<String>) {
     val cookOk = stoveOk && tipShown && introPages == 3 && opened && reopenedNoIntro && cooked.all { it } && tartRefused && fishUsed && dishesInBag &&
         pieBuff && minerHit >= 2 && stamCost in 0.9f..1.1f && fast > plain * 1.15f && expired && clearedAtNight && g.dishesCooked == 3
     println("CHECK cooking: " + if (cookOk) "PASS" else "FAIL")
+    // skills sim: everyday actions earn XP in the right skill, level-ups queue a screen, perks at 5 need a choice
+    drainLevelUps(g)
+    val xp0 = g.skillXp.copyOf()
+    val skillTipShown = g.skillsTip
+    // farming: hand-harvest a ripe crop
+    val fa = g.areas["farm"]!!; g.warp("farm", 20.5f, 20.5f, 0); g.mode = Mode.PLAY
+    fa.setG(20, 21, Gr.TILLED); fa.setO(20, 21, Ob.NONE); fa.crops[fa.idx(20, 21)] = Crop(0).apply { days = 99 }
+    g.px = 20.5f; g.py = 20.5f; g.dir = 0; g.action()
+    // foraging: pick a forage item
+    fa.setO(21, 20, Ob.FORAGE, Items.forageFor(0, false).first()); g.dir = 3; g.action()
+    // mining: break a rock in the mines
+    g.enterMine(3); g.mode = Mode.PLAY
+    val rk = g.cur.obj.indices.first { g.cur.obj[it] == Ob.ROCK && g.cur.obj.getOrNull(it + g.cur.w) == Ob.NONE }
+    g.cur.aux[rk] = 1; g.px = rk % g.cur.w + 0.5f; g.py = rk / g.cur.w + 1.5f; g.dir = 1
+    g.sel = g.inv.slots.indexOfFirst { it?.id == Tool.PICK }; g.energy = 200f; g.action()
+    // taming: win a battle against a weakened wild creature
+    g.warp("forest", 23.5f, 3.5f, 0); g.mode = Mode.PLAY
+    for (m in g.party) m.fullHeal()
+    val ww = g.cur.wilds.firstOrNull() ?: run { g.cur.wilds.add(WildMon(Mon(1, 3), 24f, 4f)); g.cur.wilds.first() }
+    ww.mon.hp = 1
+    g.startBattle(ww); val bt = g.battle!!
+    var tt = 0
+    while (!bt.over && tt++ < 20) { bt.msgs.clear(); if (!bt.over) bt.chooseMove(bt.active.moves().first { !it.heal }) }
+    bt.msgs.clear(); g.endBattle(); g.dialog = null; if (g.mode == Mode.DIALOG) g.mode = Mode.PLAY
+    val gained = (0 until Skill.COUNT).map { g.skillXp[it] - xp0[it] }
+    // level-up flow: push Farming to level 5 -> screen appears on the next update, perk choice is required
+    drainLevelUps(g)
+    g.mode = Mode.PLAY
+    g.addXp(Skill.FARM, Skills.XP[5] - g.skillXp[Skill.FARM])
+    val queued = g.levelUps.size
+    g.update(0.016f, 0f, 0f)
+    val screen = g.mode == Mode.SKILLUP
+    var guard2 = 0
+    while (g.pendingLevelUp?.second != 5 && guard2++ < 10) g.dismissLevelUp()
+    val needs = g.pendingNeedsPerk
+    g.dismissLevelUp(); val blocked = g.pendingLevelUp?.second == 5
+    val turnip = Items.produce(0); val base = Items[turnip].sell
+    g.choosePerk("market")   // wrong tier: ignored
+    g.choosePerk("tiller")
+    val perkOk = g.has("tiller") && !g.has("market") && g.mode == Mode.PLAY && g.levelUps.isEmpty()
+    g.perks.add("market"); val market = g.sellPrice(turnip); g.perks.remove("market")
+    // tiller halves hoe energy
+    g.warp("farm", 20.5f, 20.5f, 0); g.mode = Mode.PLAY; fa.setG(20, 21, Gr.GRASS); fa.setO(20, 21, Ob.NONE); fa.crops.remove(fa.idx(20, 21))
+    g.sel = g.inv.slots.indexOfFirst { it?.id == Tool.HOE }; g.dir = 0; g.buff = null; val en0 = g.energy; g.action(); val hoeCost = en0 - g.energy
+    println("skills: fishXpFromFishingSim=${g.skillXp[Skill.FISH]} gained=${Skill.names.zip(gained)} levels=${(0 until Skill.COUNT).map { g.skillLv(it) }} tip=$skillTipShown")
+    println("skills: queued=$queued screen=$screen needsPerk=$needs blocked=$blocked perkOk=$perkOk market=${base}g->${market}g hoeCost=$hoeCost")
+    val skillsOk = skillTipShown && gained.filterIndexed { i, _ -> i != Skill.FISH }.all { it > 0 } && g.skillXp[Skill.FISH] > 0 && queued >= 1 && screen && needs && blocked && perkOk && g.skillLv(Skill.FARM) == 5 &&
+        market == (base * 1.2f).toInt() && hoeCost in 0.9f..1.1f && Skills.iconRows.all { r -> r.all { it.length == 12 } && r.size == 12 }
+    println("CHECK skills: " + if (skillsOk) "PASS" else "FAIL")
     // save/load roundtrip
     g.save()
     val g2 = Game(f)
     println("loaded cooking: tip=${g2.cookTip} intro=${g2.cookIntro} cooked=${g2.dishesCooked} stove=${g2.areas["house"]!!.o(10, 2) == Ob.STOVE}")
     println("loaded goods: ${g2.areas["farm"]!!.obj.count { it == Ob.GOODS }} (was ${farmA.obj.count { it == Ob.GOODS }}) tip=${g2.goodsIntro}")
     println("loaded fish: caught=${g2.fishCaught} intro=${g2.fishIntro} rod=${g2.hasRod()} (match=${g2.fishCaught == g.fishCaught})")
+    println("loaded skills: xp=${g2.skillXp.toList() == g.skillXp.toList()} perks=${g2.perks} tip=${g2.skillsTip}")
+    // an old save without skill fields still loads, with every skill at 0
+    val old = org.json.JSONObject(f.readText()); for (k in listOf("skills", "perks", "lvlQ", "skillTip")) old.remove(k)
+    val oldF = File("$out/save_old.json"); oldF.writeText(old.toString())
+    val g3 = Game(oldF)
+    println("old save: loaded=${g3.started} skills=${g3.skillXp.toList()} perks=${g3.perks.size} tip=${g3.skillsTip}")
     println("loaded: day=${g2.day} gold=${g2.gold} party=${g2.party.size} mode=${g2.mode} crops=${g2.areas["farm"]!!.crops.size}")
     // renders
     renderArea(art, farm, 0, 0, 0, 48, 36, 2, "$out/farm.png")
