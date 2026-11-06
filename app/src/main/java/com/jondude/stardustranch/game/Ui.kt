@@ -911,7 +911,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             button(c, a.right - 130 * u, r.bottom - 34 * u, a.right - 70 * u, r.bottom - 8 * u, "Prev", listOff > 0, size = 11f) { listOff -= perPage }
             button(c, a.right - 64 * u, r.bottom - 34 * u, a.right, r.bottom - 8 * u, "Next", listOff + perPage < g.ranch.size, size = 11f) { listOff += perPage }
         }
-        text(c, "Ranch creatures do their farm job every morning. Results go to the Ranch Box by the barn.", a.left, r.bottom - 12 * u, 10f, 0xFF6E5A48.toInt())
+        text(c, "Ranch creatures do their farm job every morning (results go to the Ranch Box).", a.left, r.bottom - 12 * u, 10f, 0xFF6E5A48.toInt())
     }
 
     private fun monRow(c: Canvas, m: Mon, l: Float, t: Float, w: Float, h: Float, act: () -> Unit) {
@@ -979,18 +979,18 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     private fun drawBattle(c: Canvas) {
         val b = g.battle!!
-        val (sky, ground) = when {
-            g.cur.mineFloor > 0 -> 0xFF2A2220.toInt() to 0xFF5E5046.toInt()
-            g.cur.beach -> 0xFF7EC8F0.toInt() to 0xFFEAD49C.toInt()
-            g.cur.id == "mountain" -> 0xFF9AC8E8.toInt() to 0xFF8A9A6A.toInt()
-            else -> 0xFF8ED0F0.toInt() to 0xFF6CB84A.toInt()
-        }
-        fill.shader = LinearGradient(0f, 0f, 0f, H * 0.55f, sky, Px.lighten(sky, 0.4f), Shader.TileMode.CLAMP)
-        c.drawRect(0f, 0f, W.toFloat(), H * 0.55f, fill); fill.shader = null
-        fill.color = ground; c.drawRect(0f, H * 0.55f, W.toFloat(), H.toFloat(), fill)
-        fill.color = Px.shade(ground, 0.85f)
-        c.drawOval(W * 0.56f, H * 0.42f, W * 0.9f, H * 0.56f, fill)
-        c.drawOval(W * 0.08f, H * 0.66f, W * 0.46f, H * 0.82f, fill)
+        val kind = when { g.cur.mineFloor > 0 -> BattleArt.MINE; g.cur.beach -> BattleArt.BEACH; g.cur.id == "mountain" -> BattleArt.MOUNTAIN; else -> BattleArt.FOREST }
+        val night = kind != BattleArt.MINE && g.time >= 1200f
+        // pixel backdrop scaled to cover the screen (nearest-neighbour), centred
+        val bg = art.battleBg(kind, g.season, night)
+        val s = max(W / bg.width.toFloat(), H / bg.height.toFloat())
+        bmp(c, bg, (W - bg.width * s) / 2f, (H - bg.height * s) / 2f, bg.width * s, bg.height * s)
+        // lit platforms under each creature; the top face centre sits on the creature's foot line
+        val pl = art.platform(kind, g.season)
+        val wpw = H * 0.78f; val wph = wpw * pl.height / pl.width
+        bmp(c, pl, W * 0.73f - wpw / 2, H * 0.505f - wph * 8f / 22f, wpw, wph)
+        val mpw = H * 0.98f; val mph = mpw * pl.height / pl.width
+        bmp(c, pl, W * 0.27f - mpw / 2, H * 0.765f - mph * 8f / 22f, mpw, mph)
 
         val shakeX = if (b.flashWild > 0) sin(b.flashWild * 60) * 6 * u else 0f
         val wildSize = H * 0.36f * (0.6f + b.wild.sp.size * 0.4f)
@@ -1015,7 +1015,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
         // info boxes
         infoBox(c, b.wild, 18 * u, 16 * u, false, b.wild.speciesId in g.dexCaught)
-        infoBox(c, my, W - 270 * u, H * 0.47f, true, false)
+        infoBox(c, my, W - 270 * u, H * 0.545f, true, false)
 
         // bottom panel
         val pt = H * 0.74f

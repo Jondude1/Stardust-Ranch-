@@ -113,6 +113,20 @@ fun main(args: Array<String>) {
     for ((k, b) in small.withIndex()) ns.draw(b, k * 20 * 3, 84 * 3, 3)
     ns.save("$out/nature.png")
 
+    // battle scenes: backdrop + platforms + creatures laid out like Ui.drawBattle (wild back-right, yours front-left)
+    val scenes = listOf(Triple(BattleArt.FOREST, 0, false), Triple(BattleArt.FOREST, 2, false), Triple(BattleArt.FOREST, 3, true),
+        Triple(BattleArt.BEACH, 1, false), Triple(BattleArt.MOUNTAIN, 3, false), Triple(BattleArt.MINE, 0, false))
+    val bsS = 2; val bsh = Sheet(2 * BattleArt.BW * bsS + 6, 3 * BattleArt.BH * bsS + 6); bsh.fill(0xFF000000.toInt())
+    for ((k, sc) in scenes.withIndex()) {
+        val ox = (k % 2) * (BattleArt.BW * bsS + 6); val oy = (k / 2) * (BattleArt.BH * bsS + 3)
+        bsh.draw(BattleArt.backdrop(sc.first, sc.second, sc.third).bmp(), ox, oy, bsS)
+        val pl = BattleArt.platform(sc.first, sc.second).bmp()
+        bsh.draw(pl, ox + (140 - 40) * bsS, oy + (54 - 9) * bsS, bsS); bsh.draw(pl, ox + (52 - 40) * bsS, oy + (86 - 9) * bsS, bsS)
+        bsh.draw(art.mon(listOf(21, 13, 28, 23, 29, 9)[k])[2], ox + (140 - 16) * bsS, oy + (54 - 30) * bsS, bsS)
+        bsh.draw(art.mon(listOf(0, 3, 6, 0, 3, 6)[k])[0], ox + (52 - 16) * bsS, oy + (86 - 30) * bsS, bsS)
+    }
+    bsh.save("$out/battle.png")
+
     // game sim
     val f = File("$out/save.json"); f.delete()
     val g = Game(f)

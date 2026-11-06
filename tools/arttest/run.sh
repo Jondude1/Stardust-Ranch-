@@ -16,7 +16,7 @@ OUT=${1:-$ROOT/tools/arttest/out}
 mkdir -p "$OUT"
 SRC=$ROOT/app/src/main/java/com/jondude/stardustranch/game
 H=$ROOT/tools/arttest
-"$CACHE/kotlinc/bin/kotlinc" "$H/Bitmap.kt" "$H/Main.kt" "$SRC/Data.kt" "$SRC/Px.kt" "$SRC/Sprites.kt" "$SRC/People.kt" "$SRC/Buildings.kt" "$SRC/Terrain.kt" "$SRC/Creatures.kt" "$SRC/Icons.kt" "$SRC/Art.kt" "$SRC/World.kt" "$SRC/Mons.kt" "$SRC/Game.kt" \
+"$CACHE/kotlinc/bin/kotlinc" "$H/Bitmap.kt" "$H/Main.kt" "$SRC/Data.kt" "$SRC/Px.kt" "$SRC/Sprites.kt" "$SRC/People.kt" "$SRC/Buildings.kt" "$SRC/Terrain.kt" "$SRC/Creatures.kt" "$SRC/Icons.kt" "$SRC/BattleArt.kt" "$SRC/Art.kt" "$SRC/World.kt" "$SRC/Mons.kt" "$SRC/Game.kt" \
   -cp "$CACHE/json.jar" -d "$CACHE/arttest.jar" 2>&1 | grep -v "JAVA_TOOL\|^warning" || true
 java -cp "$CACHE/arttest.jar:$CACHE/json.jar:$CACHE/kotlinc/lib/kotlin-stdlib.jar" MainKt "$OUT" 2>&1 | grep -v JAVA_TOOL
 echo "Renders written to $OUT"

@@ -665,6 +665,10 @@ class Art {
     // =====================================================================
 
     fun item(id: Int): Bitmap = itemCache.getOrPut(id) { val d = Items[id]; (Icons.cluster(d) ?: Icons.icon(d) ?: itemPx(d)).bmp() }
+    private val battleCache = HashMap<Int, Bitmap>()
+    /** Pixel backdrop for a battle (BattleArt kinds), cached per kind/season/night. */
+    fun battleBg(kind: Int, season: Int, night: Boolean): Bitmap = battleCache.getOrPut(kind * 100 + season * 10 + (if (night) 1 else 0)) { BattleArt.backdrop(kind, season, night).bmp() }
+    fun platform(kind: Int, season: Int): Bitmap = battleCache.getOrPut(10000 + kind * 10 + season) { BattleArt.platform(kind, season).bmp() }
     /** Red-and-white float drawn on the water while fishing. */
     val bobber: Bitmap by lazy { Px.grid(Icons.BOBBER, Icons.BOBBER_PAL).bmp() }
 
