@@ -73,8 +73,14 @@ class Mon(var speciesId: Int, var level: Int, var nick: String? = null) {
     }
 }
 
-/** Turn-based battle against a wild creature. */
-class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
+/** Turn-based battle against a wild creature, or (with [trainer]) a ranger's whole team one after another. */
+class Battle(val game: Game, first: Mon, val boss: Boolean = false, val trainer: RangerDef? = null, val foes: List<Mon> = listOf(first)) {
+    /** The opposing creature currently on the field. */
+    var wild: Mon = first
+    var foeIdx = 0
+    /** Set when every creature of a ranger's team has fainted. */
+    var won = false
+    private val foe: String get() = if (trainer != null) "Foe " else "Wild "
     val msgs = ArrayDeque<String>()
     var activeIdx = game.party.indexOfFirst { !it.fainted }.coerceAtLeast(0)
     val active: Mon get() = game.party[activeIdx]
@@ -92,9 +98,15 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
 
     init {
         game.dexSeen.add(wild.speciesId)
-        msgs.add(if (boss) "The legendary ${wild.name} appears!" else "A wild ${wild.name} (Lv ${wild.level}) appeared!")
+        if (trainer != null) {
+            msgs.add("${trainer.name} wants to battle! (${foes.size} creatures)")
+            msgs.add("${trainer.name} sent out ${wild.name} (Lv ${wild.level})!")
+        } else msgs.add(if (boss) "The legendary ${wild.name} appears!" else "A wild ${wild.name} (Lv ${wild.level}) appeared!")
         msgs.add("Go, ${active.name}!")
     }
+
+    /** How many of the ranger's creatures can still fight (1 for wild battles). */
+    val foesLeft: Int get() = foes.count { !it.fainted }
 
     val waiting: Boolean get() = msgs.isNotEmpty()
 
@@ -102,7 +114,7 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
         val mult = TypeChart.mult(mv.type, def.sp.type)
         val stab = if (mv.type == att.sp.type) 1.25f else 1f
         val base = ((2f * att.level / 5f + 2f) * mv.power * att.atk / max(1, def.def)) / 40f + 2f
-        val champ = if (att !== wild && game.has("champion")) 1.1f else 1f
+        val champ = (if (att !== wild && game.has("champion")) 1.1f else 1f) * (if (att !== wild && game.hasBadge(Trials.STAR)) 1.1f else 1f)
         val dmg = (base * mult * stab * champ * (0.85f + rng.nextFloat() * 0.15f)).toInt()
         return max(1, dmg) to mult
     }
@@ -114,7 +126,7 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
     }
 
     private fun doMove(att: Mon, def: Mon, mv: Move, mine: Boolean) {
-        msgs.add("${if (mine) "" else "Wild "}${att.name} used ${mv.name}!")
+        msgs.add("${if (mine) "" else foe}${att.name} used ${mv.name}!")
         if (mv.heal) {
             val amt = att.maxHp / 2
             att.heal(amt)
@@ -133,6 +145,8 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
         val healer = ms.firstOrNull { it.heal }
         if (healer != null && wild.hp < wild.maxHp / 3 && rng.nextFloat() < 0.4f) return healer
         val atks = ms.filter { !it.heal }
+        // rangers read the type chart: usually pick their strongest move against your creature
+        if (trainer != null && rng.nextFloat() < 0.6f) return atks.maxBy { it.power * TypeChart.mult(it.type, active.sp.type) }
         return atks[rng.nextInt(atks.size)]
     }
 
@@ -154,8 +168,9 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
 
     private fun checkWildFaint(): Boolean {
         if (!wild.fainted) return false
-        msgs.add("Wild ${wild.name} fainted!")
-        val xp = (wild.level * (if (boss) 40 else 14) * (1f + wild.sp.hp / 100f) * (if (game.has("trainer")) 1.25f else 1f)).toInt()
+        msgs.add("$foe${wild.name} fainted!")
+        val xp = (wild.level * (if (boss) 40 else 14) * (1f + wild.sp.hp / 100f) * (if (game.has("trainer")) 1.25f else 1f) *
+            (if (trainer != null) 1.5f else 1f) * (if (game.hasBadge(Trials.GROVE)) 1.1f else 1f)).toInt()
         game.addXp(Skill.TAME, 6 + wild.level / 2 + (if (boss) 40 else 0))
         for (i in participants) {
             val m = game.party.getOrNull(i) ?: continue
@@ -165,6 +180,18 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
             m.bond += game.bondGain(2)
             msgs.addAll(m.gainXp(share))
             game.dexSeen.add(m.speciesId); game.dexCaught.add(m.speciesId)
+        }
+        if (trainer != null) {
+            val next = foes.indexOfFirst { !it.fainted }
+            if (next >= 0) {
+                foeIdx = next; wild = foes[next]
+                game.dexSeen.add(wild.speciesId)
+                participants = HashSet<Int>().apply { add(activeIdx) }
+                msgs.add("${trainer.name} sent out ${wild.name} (Lv ${wild.level})!")
+                return true
+            }
+            won = true
+            msgs.add("You defeated ${trainer.name}!")
         }
         over = true
         return true
@@ -198,6 +225,7 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
 
     fun throwOrb(orbId: Int) {
         menu = 0
+        if (trainer != null) { msgs.add("You can't catch another ranger's partner!"); return }
         if (boss && orbId != Items.STAR_ORB && wild.hp > wild.maxHp / 4) {
             game.inv.remove(orbId, 1)
             msgs.add("You threw a ${Items[orbId].name}...")
@@ -208,7 +236,7 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
         val power = Items[orbId].orbPower
         val hpFactor = 1f - 0.75f * wild.hp.toFloat() / wild.maxHp
         var chance = wild.sp.catchRate * power * (0.35f + hpFactor * 1.4f)
-        chance *= (1f + game.skillLv(Skill.TAME) * 0.02f) * (if (game.has("gentle")) 1.15f else 1f)
+        chance *= (1f + game.skillLv(Skill.TAME) * 0.02f) * (if (game.has("gentle")) 1.15f else 1f) * (if (game.hasBadge(Trials.TIDE)) 1.1f else 1f)
         if (game.party.size + game.ranch.size == 0) chance = 1f
         chance = chance.coerceIn(0.02f, 0.98f)
         orbAnim = 1.6f
@@ -238,6 +266,7 @@ class Battle(val game: Game, val wild: Mon, val boss: Boolean = false) {
     fun run() {
         menu = 0
         if (boss) { msgs.add("You can't run from this one!"); return }
+        if (trainer != null) { msgs.add("A ranger trial can't be fled! Win, or let your team rest after."); return }
         val chance = 0.6f + (active.spd - wild.spd) * 0.02f
         if (rng.nextFloat() < chance) {
             msgs.add("Got away safely!")

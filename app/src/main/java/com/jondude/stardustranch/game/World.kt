@@ -202,6 +202,17 @@ object World {
         return a
     }
 
+    /** Clears a 3x3 patch where the area's ranger (Trials.spots) stands. */
+    private fun rangerSpot(a: Area) {
+        val (x, y) = Trials.spots[a.id] ?: return
+        // a small clearing: tall trees in the rows just below would otherwise hide the ranger
+        for (yy in y - 1..y + 4) for (xx in x - 2..x + 2) {
+            if (abs(xx - x) == 2 && yy == y - 1) continue
+            a.setO(xx, yy, Ob.NONE)
+            if (a.g(xx, yy) != Gr.GRASS && a.g(xx, yy) != Gr.SAND && a.g(xx, yy) != Gr.DIRT) a.setG(xx, yy, if (a.beach) Gr.SAND else Gr.GRASS)
+        }
+    }
+
     fun makeForest(rng: Random): Area {
         val a = Area("forest", 50, 42)
         a.fillG(0, 0, a.w, a.h, Gr.GRASS)
@@ -242,6 +253,7 @@ object World {
         a.spawns = intArrayOf(21, 21, 15, 15, 13, 13, 33, 33, 26, 0)
         a.nightSpawns = intArrayOf(17, 17, 28, 21, 15)
         a.minLv = 2; a.maxLv = 8; a.maxWild = 9; a.forageSpots = 12
+        rangerSpot(a)
         return a
     }
 
@@ -265,6 +277,7 @@ object World {
         a.spawns = intArrayOf(23, 23, 23, 13, 26, 6)
         a.nightSpawns = intArrayOf(23, 28, 6)
         a.minLv = 4; a.maxLv = 10; a.maxWild = 6; a.forageSpots = 8
+        rangerSpot(a)
         return a
     }
 
@@ -295,6 +308,7 @@ object World {
         a.spawns = intArrayOf(9, 9, 11, 11, 15, 29, 3)
         a.nightSpawns = intArrayOf(17, 9, 11)
         a.minLv = 5; a.maxLv = 12; a.maxWild = 6; a.forageSpots = 4
+        rangerSpot(a)
         return a
     }
 

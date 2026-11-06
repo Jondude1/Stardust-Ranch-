@@ -134,6 +134,12 @@ class Game(val saveFile: File) {
     var boardTip = false     // morning-report announcement shown
     var boardIntro = false   // first-read explanation at the board shown
     var questsDone = 0
+    // ranger trials
+    val badges = HashSet<String>()
+    var trialTip = false     // morning-report announcement shown
+    var trialIntro = false   // first-talk explanation from a ranger shown
+    val trialsToday = HashSet<String>()
+    val rangers = ArrayList<Npc>()
 
     // ui
     var mode = Mode.STARTER
@@ -157,6 +163,7 @@ class Game(val saveFile: File) {
     // ---------------------------------------------------------------- skills
     fun skillLv(s: Int) = Skills.levelFor(skillXp[s])
     fun has(perk: String) = perk in perks
+    fun hasBadge(b: String) = b in badges
     /** Bond gain for one bonding event (Bond Keeper doubles it). */
     fun bondGain(n: Int) = if (has("bondkeeper")) n * 2 else n
 
@@ -245,6 +252,11 @@ class Game(val saveFile: File) {
                 "Beach creatures get feisty in the evening.",
                 "The sea fish change with the seasons. Lantern Eels only come out on autumn and winter nights.",
                 "When it storms, Storm Rays rise right up to the pier. Worth getting wet for!"), 60 to 3))
+        rangers.clear()
+        for (d in Trials.fieldRangers) {
+            val (sx, sy) = Trials.spots[d.area]!!
+            rangers.add(Npc(d.key, d.name, d.area, sx + 0.5f, sy + 0.5f, emptySet(), emptySet(), listOf(d.after), Items.ORB to 1))
+        }
     }
 
     private fun rebuildPublicAreas() {
@@ -367,6 +379,7 @@ class Game(val saveFile: File) {
         val pts = arrayOf(nx - r to ny - 0.1f, nx + r to ny - 0.1f, nx - r to ny + 0.25f, nx + r to ny + 0.25f)
         for ((x, y) in pts) if (cur.solid(floor(x).toInt(), floor(y).toInt())) return
         for (n in npcs) if (n.area == cur.id && abs(n.x - nx) < 0.6f && abs(n.y - ny) < 0.5f) return
+        for (n in rangers) if (n.area == cur.id && abs(n.x - nx) < 0.6f && abs(n.y - ny) < 0.5f) return
         px = nx; py = ny
     }
 
@@ -515,6 +528,8 @@ class Game(val saveFile: File) {
         val w = battleSource
         battle = null; battleSource = null
         mode = Mode.PLAY
+        if (hasBadge(Trials.SUMMIT) && b.over && !b.fled && !b.lost) for (m in party) if (!m.fainted) m.heal(max(1, m.maxHp * 15 / 100))
+        b.trainer?.let { endTrial(it, b); return }
         if (w != null) {
             if (b.caught || b.over && !b.fled && !b.lost) cur.wilds.remove(w) else w.cooldown = 3f
             if (b.caught && w.mon.speciesId == 35) astralCaught = true
@@ -576,6 +591,7 @@ class Game(val saveFile: File) {
         val (dvx, dvy) = dirVec()
         // NPCs
         for (n in npcs) if (n.area == cur.id && hypot(n.x - (px + dvx * 0.8f), n.y - (py + dvy * 0.8f)) < 1.0f) { talk(n); return }
+        for (n in rangers) if (n.area == cur.id && hypot(n.x - (px + dvx * 0.8f), n.y - (py + dvy * 0.8f)) < 1.0f) { talkRanger(n); return }
         // shopkeeper behind counter
         if (cur.id == "store" && cur.o(fxT, fyT) == Ob.COUNTER) { npcs.firstOrNull { it.key == "pia" }?.let { talk(it) }; return }
         // wild creature in front
@@ -629,7 +645,7 @@ class Game(val saveFile: File) {
         val opts = when (n.key) {
             "pia" -> listOf("Shop" to { mode = Mode.SHOP; shopSell = false; menuSel = -1 }, "Bye" to {})
             "gus" -> listOf("Upgrade tools" to { mode = Mode.SMITH }, "Bye" to {})
-            "wren" -> listOf("Heal my creatures" to { for (m in party) m.fullHeal(); note("Your party is fully healed!") }, "Bye" to {})
+            "wren" -> listOf("Heal my creatures" to { for (m in party) m.fullHeal(); note("Your party is fully healed!") }, "Ranger trial" to { wrenTrial() }, "Bye" to {})
             "mira" -> if (!hasRod()) listOf("Buy rod (500g)" to { buyRod() }, "Bye" to {}) else emptyList()
             else -> emptyList()
         }
@@ -957,6 +973,74 @@ class Game(val saveFile: File) {
 
     // ---------------------------------------------------------------- bulletin board
 
+    // ---------------------------------------------------------------- ranger trials
+
+    private fun trialIntroPages(d: RangerDef): Array<String> = arrayOf(
+        "I'm ${d.name}, one of the valley's rangers. We test tamers in Ranger Trials.",
+        "A trial is a battle against my whole team, one creature after another. No orbs and no running - but you can swap your creatures any time.",
+        "Beat all three field rangers - Juniper in the forest, Marlo on the beach and Flint on the mountain - and Ranger Wren at the healer's centre will face you for the Star Badge.",
+        "Every badge gives a permanent perk, and you can check them in the Badges tab of the menu. Once you've won, I'll gladly rematch you once a day.")
+
+    private fun talkRanger(n: Npc) {
+        val d = Trials.byKey[n.key] ?: return
+        n.dir = when { abs(px - n.x) > abs(py - n.y) -> if (px > n.x) 3 else 2; else -> if (py > n.y) 0 else 1 }
+        if (!trialIntro) { trialIntro = true; say(d.name, *trialIntroPages(d), onClose = { offerTrial(d) }); return }
+        offerTrial(d)
+    }
+
+    private fun offerTrial(d: RangerDef) {
+        if (!hasBadge(d.badge)) {
+            say(d.name, d.hello, "Team of ${d.team.size}, up to Lv ${d.topLevel}. Prize: ${d.gold}g + the ${d.badgeName}.",
+                options = listOf("Challenge!" to { startTrial(d) }, "Not yet" to {}))
+        } else if (d.key in trialsToday) {
+            say(d.name, "That was a good battle today. ${d.after} Come back tomorrow for a rematch.")
+        } else {
+            say(d.name, "Back for a rematch? I've been training too. (Prize: ${Trials.rematchGold(d)}g)",
+                options = listOf("Rematch!" to { startTrial(d) }, "Maybe later" to {}))
+        }
+    }
+
+    /** Ranger Wren's trial: only for tamers holding all three field badges. */
+    fun wrenTrial() {
+        val d = Trials.byKey["wren"]!!
+        if (!trialIntro) { trialIntro = true; say(d.name, *trialIntroPages(d), onClose = { wrenTrial() }); return }
+        val missing = Trials.fieldRangers.filter { !hasBadge(it.badge) }
+        if (missing.isNotEmpty()) {
+            say(d.name, "My trial is the last one. Come back when you hold the Grove, Tide and Summit Badges.",
+                "Still to earn: " + missing.joinToString(", ") { "${it.badgeName} (${it.name}, ${it.place})" } + ".")
+            return
+        }
+        offerTrial(d)
+    }
+
+    fun startTrial(d: RangerDef): Boolean {
+        if (party.none { !it.fainted }) { say(d.name, "Your creatures are worn out. Heal them first - Wren's centre or the town fountain will do it."); return false }
+        val team = d.teamMons()
+        battle = Battle(this, team[0], trainer = d, foes = team)
+        battleSource = null
+        mode = Mode.BATTLE
+        return true
+    }
+
+    private fun endTrial(d: RangerDef, b: Battle) {
+        if (b.lost || !b.won) {
+            for (m in party) if (m.hp <= 0) m.hp = 1
+            say(d.name, d.lose, "(Your creatures are worn out but safe. Heal them before your next battle.)")
+            return
+        }
+        trialsToday.add(d.key)
+        if (!hasBadge(d.badge)) {
+            badges.add(d.badge); gold += d.gold
+            friendship[d.key] = min(2500, (friendship[d.key] ?: 0) + 100)
+            say(d.name, d.win, "You received the ${d.badgeName}! ${d.perk}", "You also won ${d.gold}g." +
+                (if (badges.size == Trials.list.size) " You've collected every badge - you're a true Stardust Ranger!" else " Badges collected: ${badges.size} of ${Trials.list.size}."))
+        } else {
+            val g = Trials.rematchGold(d); gold += g
+            say(d.name, "Great rematch! Here's ${g}g for your trouble.")
+        }
+        save()
+    }
+
     private fun openBoard() {
         if (!boardIntro) {
             boardIntro = true
@@ -1207,6 +1291,8 @@ class Game(val saveFile: File) {
         if (!boardTip) { boardTip = true; lines.add("NEW: A bulletin board has gone up in the town square, just north-east of the fountain. Villagers pin requests there - accept one, bring the items to them and get paid in gold and friendship.") }
         buff = null
         if (!skillsTip) { skillsTip = true; lines.add("NEW: Skills! Farming, Foraging, Mining, Fishing and Taming now level up from 1 to 10 as you work. Each level gives a small bonus, and at levels 5 and 10 you pick a perk. See the Skills tab in the menu.") }
+        trialsToday.clear()
+        if (!trialTip && started) { trialTip = true; lines.add("NEW: Ranger Trials! Rangers Juniper (forest), Marlo (beach) and Flint (mountain) will battle your whole party for a badge. Win all three, then challenge Ranger Wren. Each badge gives a perk - see the Badges tab.") }
         if (!cookTip) { cookTip = true; lines.add("NEW: Grandma's old stove in the farmhouse kitchen works again! Face it and press Cook to turn crops, forage and fish into dishes that give energy and a buff.") }
         // weeds creep back
         repeat(4) {
@@ -1349,6 +1435,7 @@ class Game(val saveFile: File) {
             o.put("skills", JSONArray(skillXp.toList())); o.put("perks", JSONArray(perks.toList()))
             o.put("lvlQ", JSONArray(levelUps.toList())); o.put("skillTip", skillsTip)
             o.put("quests", JSONArray().apply { quests.forEach { put(it.toJson()) } }); o.put("boardTip", boardTip); o.put("boardIntro", boardIntro); o.put("qDone", questsDone)
+            o.put("badges", JSONArray(badges.toList())); o.put("trialTip", trialTip); o.put("trialIntro", trialIntro)
             val f = areas["farm"]!!
             o.put("fg", intsToStr(f.ground)); o.put("fo", intsToStr(f.obj)); o.put("fa", intsToStr(f.aux))
             o.put("fw", f.watered.joinToString("") { if (it) "1" else "0" })
@@ -1389,6 +1476,8 @@ class Game(val saveFile: File) {
             skillsTip = o.optBoolean("skillTip", false)
             o.optJSONArray("quests")?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { Quest.fromJson(it) }?.let { quests.add(it) } }
             boardTip = o.optBoolean("boardTip", false); boardIntro = o.optBoolean("boardIntro", false); questsDone = o.optInt("qDone", 0)
+            o.optJSONArray("badges")?.let { a -> for (i in 0 until a.length()) a.optString(i).takeIf { b -> Trials.list.any { it.badge == b } }?.let { badges.add(it) } }
+            trialTip = o.optBoolean("trialTip", false); trialIntro = o.optBoolean("trialIntro", false)
             val f = areas["farm"]!!
             strToInts(o.getString("fg"), f.ground); strToInts(o.getString("fo"), f.obj); strToInts(o.getString("fa"), f.aux)
             val fw = o.getString("fw"); for (i in f.watered.indices) f.watered[i] = fw.getOrNull(i) == '1'

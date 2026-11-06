@@ -622,7 +622,11 @@ object People {
             Triple("pia", 2, personPal(0xFFF4D2B4, 0xFFE07A3A, 0xFF3E9A6A, 0xFF6A5040, 0xFF5A3A2A, 0xFFF0C84A, 0xFFF0C84A)),
             Triple("wren", 3, personPal(0xFFC89068, 0xFF34303A, 0xFFE0B23A, 0xFF4A6A44, 0xFF4A3428, 0xFF4E8A4A, 0xFF8A5A32, buckle = 0xFFF0D070)),
             Triple("gus", 4, personPal(0xFFE0A884, 0xFFA05A30, 0xFF6E7280, 0xFF3E3630, 0xFF2E2622, 0xFF8E5A30, 0xFF8E5A30, apron = 0xFF9A6436)),
-            Triple("mira", 5, personPal(0xFFAD7A58, 0xFF5A3478, 0xFF4AB4D0, 0xFFE8D6B0, 0xFF6A4A6A, 0xFFF0E2F4, 0xFFF0E2F4))
+            Triple("mira", 5, personPal(0xFFAD7A58, 0xFF5A3478, 0xFF4AB4D0, 0xFFE8D6B0, 0xFF6A4A6A, 0xFFF0E2F4, 0xFFF0E2F4)),
+            // field rangers for the Ranger Trials
+            Triple("juniper", 2, personPal(0xFFE8C0A0, 0xFF8A3A2A, 0xFF4E8A4A, 0xFF6A5A3A, 0xFF4A3428, 0xFFF0C84A, 0xFFF0C84A)),
+            Triple("marlo", 0, personPal(0xFF8A5A3E, 0xFF2A2A30, 0xFF2E9AA8, 0xFFE8D6B0, 0xFF5A4A3A, 0xFFF0E2C0, 0xFF2E6AB8)),
+            Triple("flint", 4, personPal(0xFFE6B48E, 0xFF8A8690, 0xFFB84A3A, 0xFF3E4A5A, 0xFF2E2622, 0xFF6A6470, 0xFF6A6470, apron = 0xFF7A5A3A))
         )
         var pf: Array<Array<Bitmap>>? = null
         for ((key, style, pal) in people) {

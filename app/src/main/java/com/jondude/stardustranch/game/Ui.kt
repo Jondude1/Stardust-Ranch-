@@ -77,6 +77,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     private var cookPick = 0
     private val noteB = Decor.note().bmp(); private val pinB = Decor.pin().bmp()
     private val iSkill = Array(Skill.COUNT) { Skills.icon(it).bmp() }
+    private val iBadge = Trials.list.associate { it.badge to Trials.badgePx(it.badge).bmp() }
+    private val iBadgeOff = Trials.list.associate { it.badge to Trials.lockedPx(it.badge).bmp() }
 
     private val CREAM = 0xFFF6E7C4.toInt()
     private val INK = 0xFF3A2416.toInt()
@@ -311,13 +313,25 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         bmp(c, b, sx - w / 2, sy - w + 3 * sc, w, w)
     }
 
+    private fun drawNpc(c: Canvas, n: Npc) {
+        val fr = People.npc[n.key]!!
+        val sx = n.x * T - camX; val sy = n.y * T - camY
+        drawShadow(c, sx, sy, T * 0.6f)
+        bmp(c, fr[n.dir][0], sx - 8 * sc, sy - 29 * sc)
+    }
+
     private fun drawEntitiesInRow(c: Canvas, a: Area, row: Int) {
         if (a.id == "farm") for (p in g.pen) if (floor(p.y).toInt() == row) drawMonWorld(c, p.mon, p.x, p.y, p.flip, g.frame + p.x, 0.75f)
-        for (n in g.npcs) if (n.area == a.id && floor(n.y).toInt() == row) {
-            val fr = People.npc[n.key]!!
-            val sx = n.x * T - camX; val sy = n.y * T - camY
-            drawShadow(c, sx, sy, T * 0.6f)
-            bmp(c, fr[n.dir][0], sx - 8 * sc, sy - 29 * sc)
+        for (n in g.npcs) if (n.area == a.id && floor(n.y).toInt() == row) drawNpc(c, n)
+        for (n in g.rangers) if (n.area == a.id && floor(n.y).toInt() == row) {
+            drawNpc(c, n)
+            // a gold badge-star over rangers you haven't beaten yet
+            val d = Trials.byKey[n.key]
+            if (d != null && !g.hasBadge(d.badge)) {
+                val bob = if ((g.frame * 2).toInt() % 2 == 0) 0f else sc.toFloat()
+                val s2 = max(1, sc / 2)
+                icon(c, iBadge[d.badge]!!, n.x * T - camX - 8f * s2, n.y * T - camY - 31 * sc - 16f * s2 + bob, s2)
+            }
         }
         for (w in a.wilds) if (floor(w.y).toInt() == row) {
             drawMonWorld(c, w.mon, w.x, w.y, w.flip, w.anim, if (w.mon.speciesId == 35) 1.1f else 0.8f)
@@ -694,7 +708,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         var ty = t + 30 * u
         if (d.speaker != null) {
             val n = d.speaker
-            val npc = g.npcs.firstOrNull { it.name == n }
+            val npc = g.npcs.firstOrNull { it.name == n } ?: g.rangers.firstOrNull { it.name == n }
             if (npc != null) {
                 panel(c, l, t - 100 * u, l + 90 * u, t - 4 * u)
                 bmp(c, People.portraits[npc.key]!!, l + 13 * u, t - 94 * u, 64 * u, 88 * u)
@@ -744,7 +758,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     // ---------------------------------------------------------------- menu
 
-    private val tabs = listOf("Items", "Party", "Craft", "Dex", "Friends", "Skills", "Options")
+    private val tabs = listOf("Items", "Party", "Craft", "Dex", "Friends", "Skills", "Badges", "Options")
 
     private fun drawMenu(c: Canvas) {
         val r = overlay(c, "")
@@ -765,7 +779,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             3 -> drawDexTab(c, area)
             4 -> drawFriendsTab(c, area)
             5 -> drawSkillsTab(c, area)
-            6 -> drawOptionsTab(c, area)
+            6 -> drawBadgesTab(c, area)
+            7 -> drawOptionsTab(c, area)
         }
     }
 
@@ -969,6 +984,33 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             }
         }
         text(c, "Skills grow as you farm, forage, mine, fish and battle. Every level helps a little; at levels 5 and 10 you choose a perk.", a.left, a.bottom - 4 * u, 10f, 0xFF6E5A48.toInt())
+    }
+
+    // ---------------------------------------------------------------- badges (Ranger Trials)
+
+    private fun drawBadgesTab(c: Canvas, a: RectF) {
+        val rowH = min((a.height() - 24 * u) / Trials.list.size, 60 * u)
+        for ((i, d) in Trials.list.withIndex()) {
+            val y = a.top + i * rowH
+            val got = g.hasBadge(d.badge)
+            rowBg(c, a.left, y + 2 * u, a.right, y + rowH - 2 * u, got)
+            val ib = (if (got) iBadge else iBadgeOff)[d.badge]!!
+            val isz = max(1, Math.round((rowH - 12 * u) / ib.height))
+            icon(c, ib, a.left + 10 * u, y + (rowH - ib.height * isz) / 2, isz)
+            val nx = a.left + 22 * u + ib.width * isz
+            text(c, d.badgeName, nx, y + rowH * 0.36f, 14f, if (got) 0xFF8A6A12.toInt() else INK)
+            text(c, "${d.name} · ${d.place}", nx, y + rowH * 0.60f, 10f, 0xFF6E5A48.toInt())
+            text(c, (if (got) "★ " else "Perk: ") + d.perk, nx, y + rowH * 0.84f, 10f, if (got) 0xFF3E7A2A.toInt() else 0xFF6E5A48.toInt())
+            val status = when {
+                got -> if (d.key in g.trialsToday) "Rematched today" else "Earned · rematch daily"
+                d.key == "wren" && Trials.fieldRangers.any { !g.hasBadge(it.badge) } -> "Needs the other 3 badges"
+                else -> "Team of ${d.team.size}, up to Lv ${d.topLevel}"
+            }
+            text(c, status, a.right - 12 * u, y + rowH * 0.36f, 11f, if (got) 0xFF3E7A2A.toInt() else 0xFF8E3A1E.toInt(), Paint.Align.RIGHT)
+            text(c, "Prize ${if (got) Trials.rematchGold(d) else d.gold}g", a.right - 12 * u, y + rowH * 0.62f, 10f, 0xFF6E5A48.toInt(), Paint.Align.RIGHT)
+        }
+        text(c, "Talk to a ranger to battle their whole team (no orbs, no running). Each badge is a permanent perk. Badges: ${g.badges.size}/${Trials.list.size}",
+            a.left, a.bottom - 4 * u, 10f, 0xFF6E5A48.toInt())
     }
 
     private fun drawSkillUp(c: Canvas) {
@@ -1327,6 +1369,20 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val mySize = H * 0.4f * (0.6f + my.sp.size * 0.4f)
         if (!my.fainted) bmp(c, art.mon(my.speciesId)[(g.frame * 2).toInt() % 2], W * 0.27f - mySize / 2 + mineSx, H * 0.78f - mySize, mySize, mySize)
 
+        // ranger trial: the ranger stands behind their creature, with one orb pip per team member
+        val tr = b.trainer
+        if (tr != null) {
+            val fr = People.npc[tr.key]?.get(0)?.get(0)
+            if (fr != null) { val ph = H * 0.30f; bmp(c, fr, W * 0.90f - ph * 0.25f, H * 0.50f - ph, ph * 0.5f, ph) }
+            val pip = 12 * u
+            for ((i, m) in b.foes.withIndex()) {
+                val px0 = 26 * u + i * (pip + 5 * u); val py0 = 16 * u + 64 * u
+                fill.color = 0xFF2A1A16.toInt(); c.drawCircle(px0 + pip / 2, py0 + pip / 2, pip / 2 + 1.5f * u, fill)
+                fill.color = if (m.fainted) 0xFF6E6A70.toInt() else 0xFFE24848.toInt(); c.drawCircle(px0 + pip / 2, py0 + pip / 2, pip / 2, fill)
+                fill.color = if (m.fainted) 0xFF9A96A0.toInt() else 0xFFF8F0E8.toInt(); c.drawRect(px0, py0 + pip / 2 - 1 * u, px0 + pip, py0 + pip / 2 + 1 * u, fill)
+            }
+            text(c, tr.name, 26 * u + b.foes.size * (pip + 5 * u) + 6 * u, 16 * u + 74 * u, 12f, 0xFFFFF0D0.toInt(), Paint.Align.LEFT, true)
+        }
         // info boxes
         infoBox(c, b.wild, 18 * u, 16 * u, false, b.wild.speciesId in g.dexCaught)
         infoBox(c, my, W - 270 * u, H * 0.545f, true, false)
@@ -1347,9 +1403,9 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             0 -> {
                 text(c, "What will ${my.name} do?", 30 * u, pt + 38 * u, 16f)
                 button(c, bl, bt, bl + bw, bt + bh, "Fight", col = 0xFFC0503A.toInt(), size = 15f) { b.menu = 1 }
-                button(c, bl + bw + 8 * u, bt, bl + bw * 2 + 8 * u, bt + bh, "Orb", col = 0xFF3F7BC8.toInt(), size = 15f) { b.menu = 2 }
+                button(c, bl + bw + 8 * u, bt, bl + bw * 2 + 8 * u, bt + bh, "Orb", b.trainer == null, col = 0xFF3F7BC8.toInt(), size = 15f) { b.menu = 2 }
                 button(c, bl, bt + bh + 8 * u, bl + bw, bt + bh * 2 + 8 * u, "Party", col = 0xFF5DA342.toInt(), size = 15f) { b.menu = 3 }
-                button(c, bl + bw + 8 * u, bt + bh + 8 * u, bl + bw * 2 + 8 * u, bt + bh * 2 + 8 * u, "Run", col = 0xFF8E7A62.toInt(), size = 15f) { b.run() }
+                button(c, bl + bw + 8 * u, bt + bh + 8 * u, bl + bw * 2 + 8 * u, bt + bh * 2 + 8 * u, "Run", b.trainer == null, col = 0xFF8E7A62.toInt(), size = 15f) { b.run() }
             }
             1 -> {
                 val ms = my.moves()

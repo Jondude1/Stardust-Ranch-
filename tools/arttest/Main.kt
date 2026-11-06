@@ -64,6 +64,10 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
         if (g != null) {
             for (w in a.wilds) if (w.y.toInt() == y) sh.draw(art.mon(w.mon.speciesId)[0], ((w.x - x0) * T - 16).toInt() * s, ((w.y - y0) * T - 30).toInt() * s, s)
             for (n in g.npcs) if (n.area == a.id && n.y.toInt() == y) sh.draw(People.npc[n.key]!![0][0], ((n.x - x0) * T - 8).toInt() * s, ((n.y - y0) * T - 29).toInt() * s, s)
+            for (n in g.rangers) if (n.area == a.id && n.y.toInt() == y) {
+                sh.draw(People.npc[n.key]!![0][0], ((n.x - x0) * T - 8).toInt() * s, ((n.y - y0) * T - 29).toInt() * s, s)
+                Trials.byKey[n.key]?.let { d -> if (!g.hasBadge(d.badge)) sh.draw(Trials.badgePx(d.badge).bmp(), ((n.x - x0) * T - 4).toInt() * s, ((n.y - y0) * T - 31 - 8).toInt() * s, s / 2) }
+            }
             if (g.cur === a && g.py.toInt() == y) {
                 sh.draw(People.player[0][0], ((g.px - x0) * T - 8).toInt() * s, ((g.py - y0) * T - 29).toInt() * s, s)
                 g.party.firstOrNull()?.let { sh.draw(art.mon(it.speciesId)[0], ((g.px - 1.2f - x0) * T - 16).toInt() * s, ((g.py - y0) * T - 30).toInt() * s, s) }
@@ -292,6 +296,19 @@ fun renderBoardMock(g: Game, out: String) {
         sh.text("Accept", (l + r) / 2, b - 40, 24, 0xFFFFFFFF.toInt(), center = true, shadow = true)
     }
     sh.save("$out/board.png")
+}
+
+/** Plays out the current battle with the strongest move each turn; returns it once it has ended. */
+fun fightOut(g: Game, maxTurns: Int = 600): Battle? {
+    var last = g.battle; var t = 0
+    while (g.battle != null && t < maxTurns) {
+        val b = g.battle!!; last = b
+        if (b.waiting) { b.msgs.removeFirst(); continue }
+        if (b.over) { g.endBattle(); break }
+        val mv = b.active.moves().filter { !it.heal }.maxBy { it.power * TypeChart.mult(it.type, b.wild.sp.type) }
+        b.chooseMove(mv); t++
+    }
+    return last
 }
 
 fun main(args: Array<String>) {
@@ -627,6 +644,101 @@ fun main(args: Array<String>) {
     val boardOk = boardPlaced && postedAtStart in 1..Quests.MAX_POSTED && bIntro && bOpened && bReopen && acc.all { it } && fourthRefused && reminder &&
         delivered && expiredOk && postedOk && balOk && gridsOk
     println("CHECK board: " + if (boardOk) "PASS" else "FAIL")
+    // ---- ranger trials sim: placement, intro, loss without blackout, multi-creature win, badge perks, rematch cap, Wren gating
+    val trialTipSeen = g.trialTip
+    val spotsOk = Trials.spots.all { (id, xy) -> val a = g.areas[id]!!; !a.solid(xy.first, xy.second) && !a.solid(xy.first, xy.second + 1) } &&
+        g.rangers.size == 3 && g.rangers.all { People.npc.containsKey(it.key) && People.portraits.containsKey(it.key) }
+    val savedParty = ArrayList(g.party); val savedGold0 = g.gold
+    fun pickOption(label: String): Boolean {
+        val d = g.dialog ?: return false
+        val o = d.options.firstOrNull { it.first == label } ?: return false
+        g.dialog = null; g.mode = Mode.PLAY; o.second(); return true
+    }
+    fun closeDlg() { val d = g.dialog ?: return; g.dialog = null; g.mode = Mode.PLAY; d.onClose?.invoke() }
+    g.warp("forest", 26.5f, 7.5f, 1); g.mode = Mode.PLAY
+    g.cur.wilds.clear()
+    g.action()
+    val tIntro = g.mode == Mode.DIALOG && g.dialog?.pages?.size == 4 && g.trialIntro && g.dialog?.speaker == "Ranger Juniper"
+    closeDlg()
+    val tOffer = g.dialog?.options?.any { it.first == "Challenge!" } == true
+    // a weak team loses: no blackout, creatures left at 1 HP, no badge
+    g.party.clear(); g.party.add(Mon(21, 2, "Tiny"))
+    pickOption("Challenge!")
+    val lossB = fightOut(g)
+    val lossOk = lossB?.lost == true && g.cur.id == "forest" && g.party[0].hp == 1 && !g.hasBadge(Trials.GROVE) && g.mode == Mode.DIALOG
+    closeDlg()
+    // a strong team sweeps all three foes
+    g.party.clear(); g.party.add(Mon(5, 40, "Blaze"))
+    val orbs0 = g.inv.count(Items.ORB)
+    val goldPre = g.gold
+    g.action(); pickOption("Challenge!")
+    val tb = g.battle!!
+    val foeCount = tb.foes.size
+    while (tb.waiting) tb.msgs.removeFirst()
+    tb.throwOrb(Items.ORB); val orbRefused = g.inv.count(Items.ORB) == orbs0 && !tb.caught
+    tb.run(); val runRefused = !tb.fled && !tb.over
+    val winB = fightOut(g)
+    val winOk = winB?.won == true && winB.foes.all { it.fainted } && foeCount == 3 && g.hasBadge(Trials.GROVE) && g.gold - goldPre == 400 && "juniper" in g.trialsToday
+    closeDlg()
+    // same day: no rematch offered; next day: rematch for a fifth of the prize
+    g.action(); val noRematch = g.dialog?.options?.isEmpty() == true; closeDlg()
+    g.trialsToday.clear()
+    val goldR = g.gold
+    g.action(); val rematchOffered = pickOption("Rematch!")
+    fightOut(g); closeDlg()
+    val rematchOk = rematchOffered && g.gold - goldR == Trials.rematchGold(Trials.byKey["juniper"]!!)
+    // Wren refuses until the three field badges are held
+    g.wrenTrial(); val wrenGated = g.dialog?.options?.isEmpty() == true && g.dialog!!.pages.last().contains("Tide Badge"); closeDlg()
+    g.badges.add(Trials.TIDE); g.badges.add(Trials.SUMMIT)
+    g.wrenTrial(); val wrenOpen = g.dialog?.options?.any { it.first == "Challenge!" } == true
+    pickOption("Challenge!"); val wrenB = fightOut(g); closeDlg()
+    val wrenOk = wrenOpen && wrenB?.foes?.size == 4 && g.hasBadge(Trials.STAR)
+    // perks: Grove = +10% battle XP, Summit = heal 15% after a win
+    fun xpFrom(badge: Boolean): Int {
+        if (badge) g.badges.add(Trials.GROVE) else g.badges.remove(Trials.GROVE)
+        val m = Mon(5, 60, "Max"); g.party.clear(); g.party.add(m)
+        val w = WildMon(Mon(15, 10), 10f, 10f); g.cur.wilds.add(w)
+        g.startBattle(w); fightOut(g); return m.xp
+    }
+    val badgesKeep = HashSet(g.badges)
+    val xpNo = xpFrom(false); val xpYes = xpFrom(true)
+    g.badges.clear(); g.badges.addAll(badgesKeep)
+    val hm = Mon(5, 30, "Hurt"); g.party.clear(); g.party.add(hm); hm.hp = hm.maxHp / 2
+    val hpBefore = hm.hp
+    val w2 = WildMon(Mon(15, 3), 10f, 10f); g.cur.wilds.add(w2); g.startBattle(w2); fightOut(g)
+    val summitOk = hm.hp >= hpBefore + hm.maxHp * 15 / 100 - 1
+    val groveOk = xpYes == (xpNo * 1.1f).toInt() || xpYes == (xpNo * 1.1f).toInt() + 1
+    val balance = Trials.list.sumOf { it.gold } <= 4000 && Trials.list.all { Trials.rematchGold(it) <= 300 } &&
+        Trials.list.zipWithNext().all { (a, b) -> a.topLevel < b.topLevel }
+    val badgeArt = Trials.list.all { val p = Trials.badgePx(it.badge); p.w == 16 && p.p.count { c -> c != 0 } > 150 }
+    println("trials: tip=$trialTipSeen spots=$spotsOk intro=$tIntro offer=$tOffer loss=$lossOk win=$winOk foes=$foeCount orbRefused=$orbRefused runRefused=$runRefused")
+    println("trials: noRematch=$noRematch rematch=$rematchOk wrenGated=$wrenGated wren=$wrenOk xp=$xpNo->$xpYes summit=$summitOk balance=$balance art=$badgeArt badges=${g.badges}")
+    val trialsOk = trialTipSeen && spotsOk && tIntro && tOffer && lossOk && winOk && orbRefused && runRefused && noRematch && rematchOk &&
+        wrenGated && wrenOk && groveOk && summitOk && balance && badgeArt
+    println("CHECK trials: " + if (trialsOk) "PASS" else "FAIL")
+    g.party.clear(); g.party.addAll(savedParty); g.mode = Mode.PLAY; g.dialog = null
+    println("trials gold: ${savedGold0} -> ${g.gold}")
+    // balance probe: how often a fair team (two creatures a level or two above the top foe) beats each ranger
+    run {
+        val keep = HashSet(g.badges); g.badges.clear()
+        val probe = mapOf("juniper" to listOf(3 to 10, 15 to 10), "marlo" to listOf(0 to 14, 11 to 14, 9 to 13), "flint" to listOf(7 to 18, 4 to 18, 10 to 17), "wren" to listOf(8 to 25, 30 to 25, 12 to 24, 2 to 24))
+        val rates = probe.map { (k, team) ->
+            var wins = 0
+            repeat(40) { g.party.clear(); for ((sp, lv) in team) g.party.add(Mon(sp, lv)); g.startTrial(Trials.byKey[k]!!); if (fightOut(g)?.won == true) wins++; g.dialog = null; g.mode = Mode.PLAY }
+            "$k=${wins * 100 / 40}%"
+        }
+        g.badges.clear(); g.badges.addAll(keep); g.trialsToday.clear()
+        g.party.clear(); g.party.addAll(savedParty)
+        println("trials balance (greedy AI, no items): $rates")
+        val hard = mapOf("juniper" to listOf(6 to 9, 15 to 8), "marlo" to listOf(3 to 12, 15 to 12, 13 to 11), "flint" to listOf(0 to 16, 11 to 16, 21 to 15), "wren" to listOf(1 to 23, 7 to 23, 16 to 23, 29 to 22))
+        val hr = hard.map { (k, team) ->
+            var wins = 0
+            repeat(40) { g.party.clear(); for ((sp, lv) in team) g.party.add(Mon(sp, lv)); g.startTrial(Trials.byKey[k]!!); if (fightOut(g)?.won == true) wins++; g.dialog = null; g.mode = Mode.PLAY }
+            "$k=${wins * 100 / 40}%"
+        }
+        g.badges.clear(); g.badges.addAll(keep); g.trialsToday.clear(); g.party.clear(); g.party.addAll(savedParty)
+        println("trials balance (same level, poor type matchups): $hr")
+    }
     // accept one for the save roundtrip
     g.postedQuests.firstOrNull()?.let { g.acceptQuest(it) }
     // save/load roundtrip
@@ -637,11 +749,12 @@ fun main(args: Array<String>) {
     println("loaded fish: caught=${g2.fishCaught} intro=${g2.fishIntro} rod=${g2.hasRod()} (match=${g2.fishCaught == g.fishCaught})")
     println("loaded board: quests=${g2.quests.size}/${g.quests.size} active=${g2.activeQuests.size}/${g.activeQuests.size} intro=${g2.boardIntro} done=${g2.questsDone} match=${g2.quests.map { it.npc + it.item + it.qty + it.gold } == g.quests.map { it.npc + it.item + it.qty + it.gold }}")
     println("loaded skills: xp=${g2.skillXp.toList() == g.skillXp.toList()} perks=${g2.perks} tip=${g2.skillsTip}")
+    println("loaded trials: badges=${g2.badges == g.badges} (${g2.badges.size}) tip=${g2.trialTip} intro=${g2.trialIntro}")
     // an old save without skill fields still loads, with every skill at 0
-    val old = org.json.JSONObject(f.readText()); for (k in listOf("skills", "perks", "lvlQ", "skillTip", "quests", "boardTip", "boardIntro", "qDone")) old.remove(k)
+    val old = org.json.JSONObject(f.readText()); for (k in listOf("skills", "perks", "lvlQ", "skillTip", "quests", "boardTip", "boardIntro", "qDone", "badges", "trialTip", "trialIntro")) old.remove(k)
     val oldF = File("$out/save_old.json"); oldF.writeText(old.toString())
     val g3 = Game(oldF)
-    println("old save: loaded=${g3.started} skills=${g3.skillXp.toList()} perks=${g3.perks.size} tip=${g3.skillsTip} boardNotes=${g3.postedQuests.size} boardTip=${g3.boardTip}")
+    println("old save: loaded=${g3.started} skills=${g3.skillXp.toList()} perks=${g3.perks.size} tip=${g3.skillsTip} boardNotes=${g3.postedQuests.size} boardTip=${g3.boardTip} badges=${g3.badges.size} trialTip=${g3.trialTip}")
     println("loaded: day=${g2.day} gold=${g2.gold} party=${g2.party.size} mode=${g2.mode} crops=${g2.areas["farm"]!!.crops.size}")
     // renders
     renderArea(art, farm, 0, 0, 0, 48, 36, 2, "$out/farm.png")
@@ -669,5 +782,15 @@ fun main(args: Array<String>) {
     // close-up near the house at gameplay zoom
     g.cur = farm; g.px = 12.5f; g.py = 10.5f
     renderArea(art, farm, 0, 4, 2, 20, 12, 5, "$out/farm_close.png", g)
+    // ranger trials: badge sheet (8x, earned + locked) and a forest close-up with Ranger Juniper
+    val bdg = Sheet(4 * 20 * 8, 2 * 20 * 8); bdg.fill(0xFFF6E7C4.toInt())
+    for ((i, d) in Trials.list.withIndex()) { bdg.draw(Trials.badgePx(d.badge).bmp(), (i * 20 + 2) * 8, 2 * 8, 8); bdg.draw(Trials.lockedPx(d.badge).bmp(), (i * 20 + 2) * 8, 22 * 8, 8) }
+    bdg.save("$out/badges.png")
+    val fo = g.areas["forest"]!!; g.badges.clear(); g.cur = fo; g.px = 24.5f; g.py = 8.5f
+    renderArea(art, fo, 0, 18, 2, 14, 9, 4, "$out/ranger_forest.png", g)
+    val bea = g.areas["beach"]!!; g.cur = bea; g.px = 16.5f; g.py = 10.5f
+    renderArea(art, bea, 1, 8, 4, 14, 9, 4, "$out/ranger_beach.png", g)
+    val mtn = g.areas["mountain"]!!; g.cur = mtn; g.px = 24.5f; g.py = 11.5f
+    renderArea(art, mtn, 2, 16, 1, 14, 12, 4, "$out/ranger_mountain.png", g)
     println("DONE")
 }
