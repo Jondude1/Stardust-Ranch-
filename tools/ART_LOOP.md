@@ -1,4 +1,4 @@
-# Stardust Ranch graphics improvement loop
+# Stardust Ranch improvement loop (graphics + gameplay)
 
 A scheduled task runs every 10 minutes. Each run makes ONE focused, visible graphics upgrade, checks it with
 `tools/arttest/run.sh` (renders creatures.png, items.png, buildings.png and map PNGs), pushes, and logs a line below.
@@ -30,6 +30,28 @@ What "Stardew-level" means in practice:
 7. Effects and atmosphere (particles, tool impacts, splash, day/night lighting, weather, mine light)
 8. Battle scene (backgrounds, platforms, attack animations, catch animation)
 9. HUD and menus (panels, fonts, icons, hotbar, dialog boxes)
+
+## Gameplay backlog (since 2026-11-06 every run also ships ONE gameplay feature)
+Pick the highest item not yet done (mark done items with [x] and the release tag). Jon may reorder this list.
+- [ ] Fishing: rod sold at the beach, simple timing/reel minigame, 15+ original fish by location, season, time and weather
+- [ ] Creature produce: ranch creatures make goods over time (e.g. wool, honeydew, glowstones) collected from the pen, scaled by bond
+- [ ] Cooking: kitchen in the farmhouse, recipes from crops/forage/fish that give buffs (speed, luck, mining, energy)
+- [ ] Skills: Farming, Foraging, Mining, Fishing, Taming levels 1-10 with XP, level-up screen and a perk choice at 5 and 10
+- [ ] Bulletin board quests in town: daily villager requests with gold, friendship and item rewards
+- [ ] Ranger trials: 4 tamer challenges (one per season area) with multi-creature trainer battles and badges that unlock perks
+- [ ] Overworld creature abilities: creatures of a type let you cross water, smash boulders, cut thorn hedges, light the mines; gate new spots behind them
+- [ ] Farm buildings via a carpenter: coop-style creature barn upgrade, greenhouse (all-season crops), silo, shed; fruit trees
+- [ ] Artisan machines: preserves jar, keg, cheese-style press, furnace for ore bars; crafted and placed on the farm
+- [ ] Mine bosses every 25 floors, more enemy types with attack patterns, weapon tiers sold by Gus
+- [ ] Seasonal festivals on fixed dates (e.g. Spring flower fair, Summer lantern night, Fall harvest show, Winter star fest) with mini-games
+- [ ] Villager daily schedules, heart events at 2/4/6 hearts, and a collection museum for gems, fish and creatures
+- [ ] Creature eggs and breeding at the ranch, held items, and a creature that can ride/carry you faster
+- [ ] Sound effects and simple chiptune music (generated in code, no outside audio), with a volume option
+- [ ] Quality of life: storage chests, map screen, journal of goals, tool charge-up, inventory sort, larger inventory upgrade
+
+Gameplay rules: keep it fun and balanced (no huge gold/XP jumps), old saves must keep loading (new save fields optional
+with defaults), every new feature must be reachable in play and explained once in-game (dialog, sign or note), and the
+gameplay simulation in tools/arttest/Main.kt must be extended to exercise the new feature and print a check line.
 
 ## Runs
 - 2026-11-05: v1.0.1 baseline — all art procedural, first playable build.
