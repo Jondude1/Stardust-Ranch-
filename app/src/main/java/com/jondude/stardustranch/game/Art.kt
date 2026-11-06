@@ -475,6 +475,7 @@ class Art {
     // =====================================================================
 
     fun mon(id: Int): Array<Bitmap> = monCache.getOrPut(id) {
+        Creatures.frames(Dex[id])?.let { f -> return@getOrPut Array(4) { f[it].bmp() } }
         val a = monPx(Dex[id], 0); val b = monPx(Dex[id], 1)
         arrayOf(a.bmp(), b.bmp(), a.flipH().bmp(), b.flipH().bmp())
     }
