@@ -85,6 +85,7 @@ class Art {
     val fountain = Array(3) { f -> fountainSprite(f) }
     val shelf = shelfSprite()
     val chest = chestSprite()
+    val stove: Bitmap = Hud.stove.bmp()
 
     val buildings = HashMap<Int, Bitmap>()
 

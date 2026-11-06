@@ -20,6 +20,7 @@ object Ob {
     const val SPRINKLER = 24; const val QSPRINKLER = 25; const val FLOWER = 26; const val TABLE = 27; const val BOULDER = 28
     const val ANVIL = 29; const val FOUNTAIN = 30; const val SHELF = 31; const val CHEST = 32; const val COALROCK = 33
     const val GOODS = 34 // ranch goods lying in the pen; aux = item id
+    const val STOVE = 35 // farmhouse kitchen stove (cooking)
     fun walkable(o: Int) = o == NONE || o == TALLGRASS || o == FORAGE || o == FLOWER || o == LADDER || o == LADDERUP || o == GOODS
 }
 
@@ -137,7 +138,7 @@ object World {
         for (y in 0 until 9) { a.setG(0, y, Gr.INWALL); a.setG(11, y, Gr.INWALL) }
         a.fillG(0, 8, 12, 1, Gr.INWALL); a.setG(6, 8, Gr.WOOD)
         a.setO(2, 2, Ob.BED); a.setO(2, 3, Ob.BED)
-        a.setO(8, 3, Ob.TABLE); a.setO(9, 2, Ob.SHELF); a.setO(5, 2, Ob.SHELF)
+        a.setO(8, 3, Ob.TABLE); a.setO(9, 2, Ob.SHELF); a.setO(5, 2, Ob.SHELF); a.setO(10, 2, Ob.STOVE)
         a.warps.add(Warp(6, 8, 1, 1, "farm", 11, 9, 0))
         return a
     }

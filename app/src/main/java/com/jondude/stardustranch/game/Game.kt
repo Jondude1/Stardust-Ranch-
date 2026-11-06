@@ -59,7 +59,7 @@ class Dialog(val speaker: String?, val pages: List<String>, val options: List<Pa
 
 class PenMon(val mon: Mon, var x: Float, var y: Float) { var tx = x; var ty = y; var t = 0f; var flip = false }
 
-enum class Mode { PLAY, DIALOG, MENU, SHOP, SMITH, RANCH, ELEVATOR, BATTLE, STARTER, REPORT, FISH }
+enum class Mode { PLAY, DIALOG, MENU, SHOP, SMITH, RANCH, ELEVATOR, BATTLE, STARTER, REPORT, FISH, COOK }
 
 /** One cast of the fishing rod: wait for a bite, hook it, then the reel dial minigame. */
 class FishingState(val loc: Int, val bx: Int, val by: Int) {
@@ -117,6 +117,11 @@ class Game(val saveFile: File) {
     val fishCaught = HashMap<Int, Int>()
     var fishIntro = false
     var goodsIntro = false
+    // cooking
+    var buff: Buff? = null; var buffUntil = 0f
+    var cookTip = false      // morning-report announcement shown
+    var cookIntro = false    // first-use explanation at the stove shown
+    var dishesCooked = 0
     var fishing: FishingState? = null
 
     // ui
@@ -258,6 +263,7 @@ class Game(val saveFile: File) {
             var speed = 4.4f
             if (energy <= 0) speed *= 0.6f
             if (leadJob == Job.HARVEST) speed *= 1.1f
+            if (buff == Buff.SPEED) speed *= 1.2f
             val nx = jx / max(mag, 1f); val ny = jy / max(mag, 1f)
             dir = if (abs(nx) > abs(ny)) (if (nx > 0) 3 else 2) else (if (ny > 0) 0 else 1)
             tryMove(nx * speed * dt, 0f); tryMove(0f, ny * speed * dt)
@@ -288,6 +294,7 @@ class Game(val saveFile: File) {
         if (clockAcc >= 0.7f) {
             clockAcc -= 0.7f
             time += 1f
+            if (buff != null && time >= buffUntil) { note("Your ${buff!!.label} buff wore off."); buff = null }
             if (time.toInt() % 60 == 0 && time >= 1500f && time < 1501f) note("It's getting late... you should head to bed.")
             if (time >= 1560f) { fishing = null; passOut(); return false }
         }
@@ -528,6 +535,7 @@ class Game(val saveFile: File) {
             Ob.GOODS -> { pickGoods(fxT, fyT); return }
             Ob.CHEST -> { openChest(fxT, fyT); return }
             Ob.FOUNTAIN -> { say(null, "Coins glitter at the bottom of the fountain. Someone wished for rain."); return }
+            Ob.STOVE -> { openStove(); return }
             Ob.SHELF -> { say(null, if (cur.id == "house") "Grandma's old farming almanacs. One page is dog-eared: 'Creatures are family, not tools.'" else "Shelves packed with goods."); return }
         }
         if (cur.id == "farm" && fyT == 6 && fxT in 32..34) { mode = Mode.RANCH; menuSel = -1; return }
@@ -597,7 +605,8 @@ class Game(val saveFile: File) {
     private fun pickForage(x: Int, y: Int) {
         val id = cur.aux[cur.idx(x, y)]
         cur.setO(x, y, Ob.NONE)
-        val n = if (leadJob == Job.FORAGE) 2 else 1
+        var n = if (leadJob == Job.FORAGE) 2 else 1
+        if (buff == Buff.LUCK && rng.nextFloat() < 0.5f) n++
         give(id, n)
         lead?.let { it.bond++ }
     }
@@ -655,11 +664,15 @@ class Game(val saveFile: File) {
         hp = min(maxHp, hp + d.energy / 2)
         if (d.heal > 0) { if (id == Items.SNACK) lead?.heal(d.heal) else for (m in party) m.heal(d.heal) }
         toast("+${d.energy} energy", 0xFF8CE07A.toInt())
+        Cooking.byId[id]?.let { dish ->
+            buff = dish.buff; buffUntil = time + dish.minutes
+            note("${dish.buff.label} for ${dish.minutes / 60}h: ${dish.buff.effect}!")
+        }
     }
 
     private fun spend(cost: Float): Boolean {
         if (energy <= 0f) { note("You're exhausted. Eat something or go to bed."); return false }
-        energy = max(0f, energy - cost); return true
+        energy = max(0f, energy - (if (buff == Buff.STAMINA) cost * 0.5f else cost)); return true
     }
 
     private fun useTool(t: Int) {
@@ -703,7 +716,7 @@ class Game(val saveFile: File) {
                 when (o) {
                     Ob.ROCK, Ob.COPPER, Ob.IRON, Ob.GOLD, Ob.GEM, Ob.COALROCK, Ob.BOULDER -> {
                         if (o == Ob.BOULDER && lvl < 1) { note("This boulder is too tough. Upgrade your pickaxe."); return }
-                        val power = 1 + lvl + (if (leadJob == Job.MINE) 1 else 0)
+                        val power = 1 + lvl + (if (leadJob == Job.MINE) 1 else 0) + (if (buff == Buff.MINING) 1 else 0)
                         cur.aux[i] -= power
                         if (cur.aux[i] <= 0) breakRock(x, y, o)
                     }
@@ -754,7 +767,7 @@ class Game(val saveFile: File) {
 
     private fun breakRock(x: Int, y: Int, o: Int) {
         cur.setO(x, y, Ob.NONE)
-        val luck = leadJob == Job.LUCK || leadJob == Job.MINE
+        val luck = leadJob == Job.LUCK || leadJob == Job.MINE || buff == Buff.LUCK
         when (o) {
             Ob.ROCK -> { give(Items.STONE, rng.nextInt(1, 3)); if (cur.mineFloor > 0 && rng.nextFloat() < 0.04f) give(Items.COAL, 1) }
             Ob.BOULDER -> give(Items.STONE, rng.nextInt(10, 16))
@@ -859,6 +872,41 @@ class Game(val saveFile: File) {
     // Fishing
     // ======================================================================
 
+    // ---------------------------------------------------------------- cooking
+
+    private fun openStove() {
+        if (!cookIntro) {
+            cookIntro = true
+            say(null, "Grandma's old wood stove crackles to life. A recipe card is tucked behind the kettle.",
+                "Pick a dish, check you're carrying the ingredients, then tap Cook. Dishes give lots of energy plus a buff for a few hours: Swift (walk faster), Lucky (faster bites, extra forage and ore), Miner (+1 pickaxe power) or Hearty (tools use half energy).",
+                "Eat a dish from your hotbar or the Items menu. Only one buff lasts at a time, and buffs end when you sleep.",
+                onClose = { mode = Mode.COOK; menuSel = -1 })
+            return
+        }
+        mode = Mode.COOK; menuSel = -1
+    }
+
+    /** How many of an ingredient you carry (ANY_FISH counts every fish). */
+    fun ingCount(id: Int): Int = if (id == Cooking.ANY_FISH) inv.slots.sumOf { if (it != null && Items[it.id].kind == Kind.FISH) it.n else 0 } else inv.count(id)
+
+    fun canCook(d: Dish) = d.needs.all { (id, n) -> ingCount(id) >= n }
+
+    fun cook(d: Dish): Boolean {
+        if (!canCook(d)) { note("You're missing ingredients."); return false }
+        for ((id, n) in d.needs) {
+            if (id == Cooking.ANY_FISH) {
+                repeat(n) {
+                    val fishId = inv.slots.filterNotNull().filter { Items[it.id].kind == Kind.FISH }.minByOrNull { Items[it.id].sell }!!.id
+                    inv.remove(fishId, 1)
+                }
+            } else inv.remove(id, n)
+        }
+        give(d.id, 1)
+        dishesCooked++
+        toast("Cooked ${d.name}!", 0xFFFFE07A.toInt())
+        return true
+    }
+
     fun hasRod() = inv.count(Tool.ROD) + ranchBox.count(Tool.ROD) > 0
 
     fun buyRod() {
@@ -899,7 +947,7 @@ class Game(val saveFile: File) {
         mode = Mode.FISH
     }
 
-    private fun biteWait(): Float = (1.4f + rng.nextFloat() * 3.6f) * (if (lead?.sp?.type == EType.TIDE) 0.7f else 1f)
+    private fun biteWait(): Float = (1.4f + rng.nextFloat() * 3.6f) * (if (lead?.sp?.type == EType.TIDE) 0.7f else 1f) * (if (buff == Buff.LUCK) 0.7f else 1f)
 
     /** Picks a fish that lives here right now (location, season, hour, weather), weighted by rarity. */
     fun rollFish(loc: Int): FishDef {
@@ -1032,6 +1080,8 @@ class Game(val saveFile: File) {
             if (r != null) lines.add(r)
         }
         makeGoods(farm, lines)
+        buff = null
+        if (!cookTip) { cookTip = true; lines.add("NEW: Grandma's old stove in the farmhouse kitchen works again! Face it and press Cook to turn crops, forage and fish into dishes that give energy and a buff.") }
         // weeds creep back
         repeat(4) {
             val x = rng.nextInt(3, farm.w - 3); val y = rng.nextInt(3, farm.h - 3)
@@ -1169,6 +1219,7 @@ class Game(val saveFile: File) {
             o.put("deepest", deepest); o.put("astral", astralCaught)
             o.put("friends", JSONObject(friendship as Map<*, *>)); o.put("hgifts", JSONArray(heartGifts.toList()))
             o.put("fish", JSONObject().apply { for ((k, v) in fishCaught) put(k.toString(), v) }); o.put("fishTip", fishIntro); o.put("goodsTip", goodsIntro)
+            o.put("cookTip", cookTip); o.put("cookIntro", cookIntro); o.put("cooked", dishesCooked)
             val f = areas["farm"]!!
             o.put("fg", intsToStr(f.ground)); o.put("fo", intsToStr(f.obj)); o.put("fa", intsToStr(f.aux))
             o.put("fw", f.watered.joinToString("") { if (it) "1" else "0" })
@@ -1202,6 +1253,7 @@ class Game(val saveFile: File) {
             val fc = o.optJSONObject("fish"); if (fc != null) for (k in fc.keys()) k.toIntOrNull()?.let { fishCaught[it] = fc.optInt(k) }
             fishIntro = o.optBoolean("fishTip", false)
             goodsIntro = o.optBoolean("goodsTip", false)
+            cookTip = o.optBoolean("cookTip", false); cookIntro = o.optBoolean("cookIntro", false); dishesCooked = o.optInt("cooked", 0)
             val f = areas["farm"]!!
             strToInts(o.getString("fg"), f.ground); strToInts(o.getString("fo"), f.obj); strToInts(o.getString("fa"), f.aux)
             val fw = o.getString("fw"); for (i in f.watered.indices) f.watered[i] = fw.getOrNull(i) == '1'

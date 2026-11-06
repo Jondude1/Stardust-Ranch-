@@ -128,6 +128,9 @@ object Items {
         )
         for ((i, gd) in goods.withIndex()) add(ItemDef(140 + i, gd.first, Kind.GOODS, gd.second, EType.values()[i].color, 0xFFFFFFFF.toInt(), gd.third, energy = if (i == 1) 30 else 0))
 
+        for (d in Cooking.list) add(ItemDef(d.id, d.name, Kind.FOOD, d.price, d.c1, 0xFFF2F0F8.toInt(),
+            "${d.flavour} +${d.energy} energy. ${d.buff.label} for ${d.minutes / 60}h: ${d.buff.effect}.", energy = d.energy, heal = d.heal))
+
         add(ItemDef(SPRINKLER, "Sprinkler", Kind.PLACE, 300, 0xFF8FA6B8.toInt(), 0xFF4A8AD9.toInt(), "Waters the 4 tiles around it each morning."))
         add(ItemDef(QSPRINKLER, "Quality Sprinkler", Kind.PLACE, 900, 0xFFF5C842.toInt(), 0xFF4A8AD9.toInt(), "Waters the 8 tiles around it each morning."))
     }
@@ -160,6 +163,38 @@ object Recipes {
         Recipe(Items.SPRINKLER, 1, listOf(Items.COPPER to 2, Items.IRON to 1)),
         Recipe(Items.QSPRINKLER, 1, listOf(Items.IRON to 2, Items.GOLD to 1, Items.COAL to 1))
     )
+}
+
+// ---------------------------------------------------------------------------
+// Cooking: dishes made at the farmhouse stove. Each gives energy plus one timed buff.
+// ---------------------------------------------------------------------------
+
+enum class Buff(val label: String, val effect: String, val color: Int) {
+    SPEED("Swift", "+20% walking speed", 0xFF5AA0E0.toInt()),
+    LUCK("Lucky", "faster bites, extra forage and ore", 0xFF4A9A40.toInt()),
+    MINING("Miner", "+1 pickaxe power", 0xFF8A98AE.toInt()),
+    STAMINA("Hearty", "tools use half energy", 0xFF3E9A3A.toInt())
+}
+
+/** ingredient id ANY_FISH accepts any fish (cheapest first). minutes = buff length in game minutes. */
+data class Dish(val id: Int, val name: String, val needs: List<Pair<Int, Int>>, val energy: Int, val heal: Int,
+                val price: Int, val buff: Buff, val minutes: Int, val c1: Int, val flavour: String)
+
+object Cooking {
+    const val ANY_FISH = -1
+    val list = listOf(
+        Dish(160, "Garden Salad", listOf(50 to 1, Items.produce(0) to 1), 55, 0, 110, Buff.SPEED, 240, 0xFF4A9A40.toInt(), "Crisp leeks and turnip with a berry dressing."),
+        Dish(161, "Hearty Stew", listOf(Items.produce(1) to 1, 61 to 1), 80, 0, 160, Buff.STAMINA, 300, 0xFF8A5030.toInt(), "Potato and mushroom simmered low and slow."),
+        Dish(162, "Grilled Fish", listOf(ANY_FISH to 1, Items.FIBER to 1), 60, 0, 120, Buff.LUCK, 240, 0xFFC8823A.toInt(), "Herb-wrapped and charred over the stove."),
+        Dish(163, "Tomato Soup", listOf(Items.produce(4) to 2), 70, 0, 150, Buff.SPEED, 300, 0xFFD8402A.toInt(), "Smooth, sweet and swirled with cream."),
+        Dish(164, "Berry Tart", listOf(Items.produce(5) to 3, 141 to 1), 90, 0, 260, Buff.LUCK, 360, 0xFF5A78E0.toInt(), "Blueberries glazed with honeydew."),
+        Dish(165, "Miner's Pie", listOf(Items.produce(8) to 1, 54 to 1), 110, 0, 460, Buff.MINING, 360, 0xFFE0A040.toInt(), "A pumpkin and hazelnut pie that sits heavy in a miner's pack."),
+        Dish(166, "Ember Curry", listOf(Items.produce(10) to 1, 142 to 1), 85, 0, 190, Buff.MINING, 300, 0xFFE8822A.toInt(), "Eggplant curry cooked over a creature's warm cinder."),
+        Dish(167, "Snow Yam Roast", listOf(57 to 1, Items.COAL to 1), 75, 0, 140, Buff.STAMINA, 300, 0xFF9A5A6A.toInt(), "Roasted in the coals until the skin crackles."),
+        Dish(168, "Sea Chowder", listOf(ANY_FISH to 1, Items.produce(7) to 1, 58 to 1), 100, 50, 240, Buff.LUCK, 300, 0xFFE8DCC0.toInt(), "Creamy corn chowder. Also heals your party 50.")
+    )
+    val byId = list.associateBy { it.id }
+    fun ingName(id: Int) = if (id == ANY_FISH) "Any fish" else Items[id].name
 }
 
 // ---------------------------------------------------------------------------

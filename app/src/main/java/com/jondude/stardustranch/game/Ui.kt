@@ -7,6 +7,8 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RadialGradient
 import android.graphics.Rect
 import android.graphics.RectF
@@ -55,8 +57,26 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     private val dst = RectF()
     private val tmpR = Rect()
 
+    // pixel-art HUD (Hud.kt): hs = screen pixels per art pixel
+    var hs = 3
+    private val solid = Paint().apply { isAntiAlias = false }
+    private val shadowP = Paint().apply { isFilterBitmap = false; colorFilter = PorterDuffColorFilter(0x58000000, PorterDuff.Mode.SRC_IN) }
+    private val dimP = Paint().apply { isFilterBitmap = false; alpha = 90 }
+    private val srcR = Rect()
+    private val panelB = Hud.panel().bmp()
+    private val slotB = Hud.slot(false).bmp(); private val slotSelB = Hud.slot(true).bmp()
+    private val rowB = Hud.row(false).bmp(); private val rowSelB = Hud.row(true).bmp()
+    private val iCoin = Hud.coin.bmp(); private val iHeart = Hud.heart(true).bmp(); private val iHeartE = Hud.heart(false).bmp()
+    private val iBolt = Hud.bolt().bmp(); private val iSun = Hud.sun.bmp(); private val iRain = Hud.rain.bmp(); private val iFlake = Hud.flake.bmp()
+    private val iX = Hud.xmark.bmp(); private val iArrow = Hud.arrow.bmp()
+    private val iSeason = Array(4) { Hud.season(it).bmp() }
+    private val iBuff = Buff.values().associateWith { Hud.buff(it).bmp() }
+    private val btnCache = HashMap<Int, Bitmap>()
+    private val barCache = HashMap<Int, IntArray>()
+    private val roundCache = HashMap<String, Bitmap>()
+    private var cookPick = 0
+
     private val CREAM = 0xFFF6E7C4.toInt()
-    private val WOODC = 0xFF6E4422.toInt()
     private val INK = 0xFF3A2416.toInt()
     private val GOLD = 0xFFF2C842.toInt()
 
@@ -65,6 +85,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         sc = max(2, Math.round(h / (16f * 11f)))
         T = 16 * sc
         u = h / 360f
+        hs = Hud.scaleFor(u)
+        roundCache.clear()
         val ab = 62 * u
         aBtn.set(W - ab - 18 * u, H - ab - 34 * u, W - 18 * u, H - 34 * u)
         bBtn.set(W - ab * 0.62f - 26 * u - ab, H - ab * 0.62f - 72 * u, W - 26 * u - ab, H - 72 * u)
@@ -127,7 +149,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     fun back() {
         when (g.mode) {
             Mode.PLAY -> { g.mode = Mode.MENU; g.menuSel = -1 }
-            Mode.MENU, Mode.SHOP, Mode.SMITH, Mode.RANCH, Mode.ELEVATOR -> g.mode = Mode.PLAY
+            Mode.MENU, Mode.SHOP, Mode.SMITH, Mode.RANCH, Mode.ELEVATOR, Mode.COOK -> g.mode = Mode.PLAY
             Mode.DIALOG -> closeDialog()
             Mode.FISH -> g.fishCancel()
             else -> {}
@@ -156,6 +178,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
                 Mode.STARTER -> drawStarter(c)
                 Mode.REPORT -> drawReport(c)
                 Mode.FISH -> drawFishing(c)
+                Mode.COOK -> drawCook(c)
                 else -> {}
             }
         }
@@ -250,7 +273,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             Ob.FORAGE, Ob.GOODS -> art.item(a.aux[i]); Ob.FENCE -> art.fence; Ob.BIN -> art.bin; Ob.BOX -> art.box
             Ob.COUNTER -> art.counter; Ob.HEALER -> art.healer; Ob.ELEVATOR -> art.elevator; Ob.LADDER -> art.ladder; Ob.LADDERUP -> art.ladderUp
             Ob.SPRINKLER -> art.item(Items.SPRINKLER); Ob.QSPRINKLER -> art.item(Items.QSPRINKLER); Ob.FLOWER -> art.flower[a.aux[i] % 3]
-            Ob.TABLE -> art.table; Ob.ANVIL -> art.anvil; Ob.SHELF -> art.shelf; Ob.CHEST -> art.chest
+            Ob.TABLE -> art.table; Ob.ANVIL -> art.anvil; Ob.SHELF -> art.shelf; Ob.CHEST -> art.chest; Ob.STOVE -> art.stove
             Ob.BED -> { if (a.o(x, y - 1) == Ob.BED) return; art.bed }
             Ob.FOUNTAIN -> { if (a.o(x - 1, y) == Ob.FOUNTAIN || a.o(x, y + 1) == Ob.FOUNTAIN) return; art.fountain[((g.frame * 4).toInt()) % 3] }
             else -> return
@@ -418,11 +441,36 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     // ---------------------------------------------------------------- HUD
 
-    private fun panel(c: Canvas, l: Float, t: Float, r: Float, b: Float, col: Int = CREAM) {
-        fill.color = 0x60000000; c.drawRoundRect(l + 3 * u, t + 4 * u, r + 3 * u, b + 4 * u, 8 * u, 8 * u, fill)
-        fill.color = WOODC; c.drawRoundRect(l, t, r, b, 8 * u, 8 * u, fill)
-        fill.color = col; c.drawRoundRect(l + 3 * u, t + 3 * u, r - 3 * u, b - 3 * u, 6 * u, 6 * u, fill)
+    /** Draws a 9-slice pixel bitmap: corners k source pixels at s screen pixels each, middle strips stretched. */
+    private fun nine(c: Canvas, b: Bitmap, k: Int, l: Float, t: Float, r: Float, bt: Float, s: Int = hs, p: Paint = px) {
+        val L = Math.round(l).toFloat(); val Tp = Math.round(t).toFloat(); val R = Math.round(r).toFloat(); val B = Math.round(bt).toFloat()
+        val kx = min((k * s).toFloat(), floor((R - L) / 2)); val ky = min((k * s).toFloat(), floor((B - Tp) / 2))
+        val xs = floatArrayOf(L, L + kx, R - kx, R); val ys = floatArrayOf(Tp, Tp + ky, B - ky, B)
+        val sx = intArrayOf(0, k, b.width - k, b.width); val sy = intArrayOf(0, k, b.height - k, b.height)
+        for (j in 0..2) for (i in 0..2) {
+            if (xs[i + 1] <= xs[i] || ys[j + 1] <= ys[j]) continue
+            srcR.set(sx[i], sy[j], sx[i + 1], sy[j + 1]); dst.set(xs[i], ys[j], xs[i + 1], ys[j + 1])
+            c.drawBitmap(b, srcR, dst, p)
+        }
     }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun panel(c: Canvas, l: Float, t: Float, r: Float, b: Float, col: Int = CREAM) {
+        nine(c, panelB, Hud.PANEL_K, l + hs, t + 2 * hs, r + hs, b + 2 * hs, p = shadowP)
+        nine(c, panelB, Hud.PANEL_K, l, t, r, b)
+    }
+
+    /** A list card behind rows in menus (gold when selected). */
+    private fun rowBg(c: Canvas, l: Float, t: Float, r: Float, b: Float, sel: Boolean = false) = nine(c, if (sel) rowSelB else rowB, Hud.ROW_K, l, t, r, b)
+
+    /** A recessed item slot (gold-framed when selected). */
+    private fun slotBg(c: Canvas, l: Float, t: Float, r: Float, b: Float, sel: Boolean = false) = nine(c, if (sel) slotSelB else slotB, Hud.SLOT_K, l, t, r, b)
+
+    private fun icon(c: Canvas, b: Bitmap, x: Float, y: Float, s: Int = hs) = bmp(c, b, Math.round(x).toFloat(), Math.round(y).toFloat(), (b.width * s).toFloat(), (b.height * s).toFloat())
+
+    private fun btnBmp(col: Int) = btnCache.getOrPut(col) { Hud.button(col).bmp() }
+
+    private fun roundBmp(d: Int, col: Int, pressed: Boolean, alpha: Int = 255) = roundCache.getOrPut("$d/$col/$pressed/$alpha") { Hud.round(d, col, pressed, alpha).bmp() }
 
     private fun text(c: Canvas, s: String, x: Float, y: Float, size: Float, col: Int = INK, align: Paint.Align = Paint.Align.LEFT, shadow: Boolean = false) {
         txt.textSize = size * u; txt.textAlign = align
@@ -445,16 +493,46 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     }
 
     private fun button(c: Canvas, l: Float, t: Float, r: Float, b: Float, label: String, enabled: Boolean = true, col: Int = 0xFF5DA342.toInt(), size: Float = 13f, act: () -> Unit) {
-        fill.color = 0x50000000; c.drawRoundRect(l + 2 * u, t + 3 * u, r + 2 * u, b + 3 * u, 6 * u, 6 * u, fill)
-        fill.color = if (enabled) col else 0xFF9A9088.toInt(); c.drawRoundRect(l, t, r, b, 6 * u, 6 * u, fill)
-        fill.color = 0x30FFFFFF; c.drawRoundRect(l + 2 * u, t + 2 * u, r - 2 * u, (t + b) / 2, 5 * u, 5 * u, fill)
-        text(c, label, (l + r) / 2, (t + b) / 2 + size * 0.36f * u, size, Color.WHITE, Paint.Align.CENTER, true)
+        val s = if (b - t < 22 * u) max(1, hs * 2 / 3) else hs
+        nine(c, btnBmp(if (enabled) col else 0xFF9A9088.toInt()), Hud.BUTTON_K, l, t, r, b, s)
+        if (label.isNotEmpty()) text(c, label, (l + r) / 2, (t + b) / 2 + size * 0.36f * u - s, size, if (enabled) Color.WHITE else 0xFFECE6DE.toInt(), Paint.Align.CENTER, true)
         if (enabled) btn(l, t, r, b, act)
     }
 
+    private fun rectS(c: Canvas, l: Float, t: Float, r: Float, b: Float, col: Int) {
+        solid.color = col; c.drawRect(Math.round(l).toFloat(), Math.round(t).toFloat(), Math.round(r).toFloat(), Math.round(b).toFloat(), solid)
+    }
+
+    /** Pixel bar: dark outline, recessed track, fill shaded in bands (highlight on top, shade at the bottom). */
     private fun bar(c: Canvas, l: Float, t: Float, r: Float, b: Float, frac: Float, col: Int) {
-        fill.color = 0xFF3A2A22.toInt(); c.drawRoundRect(l, t, r, b, 3 * u, 3 * u, fill)
-        fill.color = col; c.drawRoundRect(l + 1.5f * u, t + 1.5f * u, l + 1.5f * u + (r - l - 3 * u) * frac.coerceIn(0f, 1f), b - 1.5f * u, 2 * u, 2 * u, fill)
+        val s = max(1f, floor(hs * 0.67f))
+        rectS(c, l, t, r, b, 0xFF2A1A16.toInt())
+        val il = l + s; val it = t + s; val ir = r - s; val ib = b - s
+        rectS(c, il, it, ir, ib, 0xFF5A463C.toInt()); rectS(c, il, it, ir, it + s, 0xFF3E2C26.toInt())
+        val fw = floor((ir - il) * frac.coerceIn(0f, 1f) / s) * s
+        if (fw <= 0f) return
+        val rp = barCache.getOrPut(col) { Hud.barRamp(col) }
+        rectS(c, il, it, il + fw, ib, rp[2])
+        if (ib - it >= 3 * s) rectS(c, il, it + s, il + fw, it + 2 * s, rp[1])
+        rectS(c, il, it, il + fw, it + s, rp[0])
+        if (ib - it >= 2 * s) rectS(c, il, ib - s, il + fw, ib, rp[4])
+    }
+
+    /** Vertical pixel bar that fills upward; lit column on the left, shaded on the right. */
+    private fun vbar(c: Canvas, l: Float, t: Float, r: Float, b: Float, frac: Float, col: Int) {
+        val s = max(1f, floor(hs * 0.67f))
+        rectS(c, l, t, r, b, 0xFF2A1A16.toInt())
+        val il = l + s; val it = t + s; val ir = r - s; val ib = b - s
+        rectS(c, il, it, ir, ib, 0xFF5A463C.toInt()); rectS(c, il, it, il + s, ib, 0xFF3E2C26.toInt())
+        val fh = floor((ib - it) * frac.coerceIn(0f, 1f) / s) * s
+        if (fh <= 0f) return
+        val rp = barCache.getOrPut(col) { Hud.barRamp(col) }
+        val ft = ib - fh
+        rectS(c, il, ft, ir, ib, rp[2])
+        if (ir - il >= 3 * s) rectS(c, il + s, ft, il + 2 * s, ib, rp[1])
+        rectS(c, il, ft, il + s, ib, rp[0])
+        rectS(c, ir - s, ft, ir, ib, rp[4])
+        rectS(c, il, ft, ir, ft + s, rp[0])
     }
 
     private fun hpCol(f: Float) = if (f > 0.5f) 0xFF5DD45A.toInt() else if (f > 0.2f) 0xFFF2C842.toInt() else 0xFFE2483A.toInt()
@@ -467,92 +545,109 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     private fun drawHud(c: Canvas) {
         if (g.mode == Mode.STARTER) return
-        // clock panel
-        val l = 10 * u; val t = 8 * u
-        panel(c, l, t, l + 132 * u, t + 62 * u)
-        text(c, "${Season.names[g.season]} ${g.day} · Y${g.year}", l + 10 * u, t + 20 * u, 13f)
-        text(c, timeStr(), l + 10 * u, t + 38 * u, 15f, if (g.time >= 1440) 0xFFC0302A.toInt() else INK)
-        text(c, if (g.raining) "Rain" else if (g.season == 3) "Snow" else "Sunny", l + 122 * u, t + 38 * u, 11f, 0xFF6E5A48.toInt(), Paint.Align.RIGHT)
-        text(c, "${g.gold}g", l + 10 * u, t + 55 * u, 13f, 0xFF8A6A12.toInt())
-        text(c, g.cur.name, l + 122 * u, t + 55 * u, 10f, 0xFF6E5A48.toInt(), Paint.Align.RIGHT)
+        // date / time / gold plaque
+        val l = 8 * u; val t = 8 * u; val pw = 158 * u; val ph = 76 * u
+        panel(c, l, t, l + pw, t + ph)
+        val ix = l + 12 * u
+        icon(c, iSeason[g.season], ix, t + 11 * u)
+        text(c, "${Season.names[g.season]} ${g.day} · Y${g.year}", ix + 9 * hs + 5 * u, t + 23 * u, 13f)
+        text(c, timeStr(), ix, t + 45 * u, 16f, if (g.time >= 1440) 0xFFC0302A.toInt() else INK)
+        val wIcon = if (g.raining) iRain else if (g.season == 3) iFlake else iSun
+        icon(c, wIcon, l + pw - 12 * u - wIcon.width * hs, t + 46 * u - wIcon.height * hs)
+        rectS(c, ix, t + 50 * u, l + pw - 12 * u, t + 50 * u + max(1, hs / 2), 0xFFD8BE8A.toInt())
+        icon(c, iCoin, ix, t + 53 * u)
+        text(c, "${g.gold}g", ix + 9 * hs + 5 * u, t + 65 * u, 13f, 0xFF8A6A12.toInt())
+        text(c, g.cur.name, l + pw - 12 * u, t + 65 * u, 10f, 0xFF6E5A48.toInt(), Paint.Align.RIGHT)
+        var py = t + ph + 5 * u
         // lead creature
         val lead = g.party.firstOrNull()
         if (lead != null) {
-            val ly = t + 68 * u
-            panel(c, l, ly, l + 132 * u, ly + 34 * u)
-            bmp(c, art.mon(lead.speciesId)[0], l + 4 * u, ly + 1 * u, 32 * u, 32 * u)
-            text(c, "${lead.name} Lv${lead.level}", l + 38 * u, ly + 15 * u, 10.5f)
-            bar(c, l + 38 * u, ly + 19 * u, l + 124 * u, ly + 27 * u, lead.hp.toFloat() / lead.maxHp, hpCol(lead.hp.toFloat() / lead.maxHp))
+            panel(c, l, py, l + pw, py + 44 * u)
+            bmp(c, art.mon(lead.speciesId)[0], l + 8 * u, py + 6 * u, 32 * u, 32 * u)
+            text(c, "${lead.name} Lv${lead.level}", l + 44 * u, py + 21 * u, 10.5f)
+            val f = lead.hp.toFloat() / lead.maxHp
+            bar(c, l + 44 * u, py + 25 * u, l + pw - 12 * u, py + 33 * u, f, hpCol(f))
+            py += 49 * u
         }
-        // energy & hp bars (right side, vertical)
-        val bx = W - 30 * u; val btop = 12 * u; val bbot = 132 * u
-        panel(c, bx - 6 * u, btop - 4 * u, bx + 22 * u, bbot + 18 * u)
-        bar(c, bx, btop + 2 * u, bx + 7 * u, bbot, 1f, 0xFF3A2A22.toInt())
+        // active food buff
+        val bf = g.buff
+        if (bf != null) {
+            panel(c, l, py, l + pw, py + 36 * u)
+            icon(c, iBuff[bf]!!, l + 12 * u, py + 18 * u - 4.5f * hs)
+            val left = max(0, (g.buffUntil - g.time).toInt())
+            text(c, "${bf.label}  ${left / 60}h ${"%02d".format(left % 60)}m", l + 12 * u + 9 * hs + 6 * u, py + 23 * u, 12f, 0xFF3E7A2A.toInt())
+        }
+        // energy & health (right side, vertical)
+        val el = W - 52 * u; val et = 8 * u; val eb = 164 * u
+        panel(c, el, et, W - 8 * u, eb)
+        val cx1 = el + 16 * u; val cx2 = el + 30 * u
+        icon(c, iBolt, cx1 - iBolt.width * hs / 2f, et + 11 * u)
+        icon(c, iHeart, cx2 - iHeart.width * hs / 2f, et + 12 * u)
         val ef = g.energy / g.maxEnergy
-        fill.color = if (ef > 0.25f) 0xFF5DD45A.toInt() else 0xFFE2483A.toInt()
-        c.drawRoundRect(bx + 1.5f * u, bbot - (bbot - btop - 2 * u) * ef, bx + 5.5f * u, bbot - 1.5f * u, 2 * u, 2 * u, fill)
-        val hf = g.hp.toFloat() / g.maxHp
-        bar(c, bx + 9 * u, btop + 2 * u, bx + 16 * u, bbot, 1f, 0xFF3A2A22.toInt())
-        fill.color = 0xFFE2483A.toInt(); c.drawRoundRect(bx + 10.5f * u, bbot - (bbot - btop - 2 * u) * hf, bx + 14.5f * u, bbot - 1.5f * u, 2 * u, 2 * u, fill)
-        text(c, "E  H", bx + 8 * u, bbot + 12 * u, 9f, INK, Paint.Align.CENTER)
+        vbar(c, cx1 - 5 * u, et + 32 * u, cx1 + 5 * u, eb - 11 * u, ef, if (ef > 0.25f) 0xFF5DC44A.toInt() else 0xFFE2483A.toInt())
+        vbar(c, cx2 - 5 * u, et + 32 * u, cx2 + 5 * u, eb - 11 * u, g.hp.toFloat() / g.maxHp, 0xFFE2483A.toInt())
 
         // hotbar
         val slot = 38 * u; val n = 8
-        val hx = W / 2f - slot * n / 2f - 18 * u; val hy = H - slot - 10 * u
-        panel(c, hx - 6 * u, hy - 6 * u, hx + slot * n + 6 * u + 26 * u, hy + slot + 6 * u)
+        val hx = W / 2f - slot * n / 2f - 18 * u; val hy = H - slot - 12 * u
+        panel(c, hx - 10 * u, hy - 10 * u, hx + slot * n + 38 * u, hy + slot + 10 * u)
         for (i in 0 until n) {
             val si = hotRow * 8 + i
             val sx = hx + i * slot
-            fill.color = if (si == g.sel) 0xFFFFE07A.toInt() else 0xFFE8D2A2.toInt()
-            c.drawRoundRect(sx + 2 * u, hy + 2 * u, sx + slot - 2 * u, hy + slot - 2 * u, 4 * u, 4 * u, fill)
-            if (si == g.sel) { stroke.color = 0xFFC0302A.toInt(); stroke.strokeWidth = 2.5f * u; c.drawRoundRect(sx + 2 * u, hy + 2 * u, sx + slot - 2 * u, hy + slot - 2 * u, 4 * u, 4 * u, stroke) }
+            slotBg(c, sx + 1 * u, hy + 1 * u, sx + slot - 1 * u, hy + slot - 1 * u, si == g.sel)
             val s = g.inv.slots[si]
             if (s != null) {
-                bmp(c, art.item(s.id), sx + 5 * u, hy + 5 * u, slot - 10 * u, slot - 10 * u)
+                bmp(c, art.item(s.id), sx + 5 * u, hy + 4 * u, slot - 10 * u, slot - 10 * u)
                 if (s.n > 1) text(c, "${s.n}", sx + slot - 4 * u, hy + slot - 4 * u, 10f, Color.WHITE, Paint.Align.RIGHT, true)
-                if (s.id < 6 && g.toolLevel[s.id] > 0) { fill.color = arrayOf(0, 0xFFD9824A.toInt(), 0xFFC8CCD6.toInt(), GOLD)[g.toolLevel[s.id]]; c.drawCircle(sx + 9 * u, hy + 9 * u, 3.5f * u, fill) }
-                if (s.id == Tool.CAN) bar(c, sx + 5 * u, hy + slot - 9 * u, sx + slot - 5 * u, hy + slot - 4 * u, g.water.toFloat() / g.waterMax, 0xFF4A9AE0.toInt())
+                if (s.id < 6 && g.toolLevel[s.id] > 0) {
+                    val gc = arrayOf(0, 0xFFD9824A.toInt(), 0xFFC8CCD6.toInt(), GOLD)[g.toolLevel[s.id]]
+                    rectS(c, sx + 5 * u, hy + 5 * u, sx + 5 * u + 3 * hs, hy + 5 * u + 3 * hs, 0xFF2A1A16.toInt())
+                    rectS(c, sx + 5 * u + hs / 2, hy + 5 * u + hs / 2, sx + 5 * u + 3 * hs - hs / 2, hy + 5 * u + 3 * hs - hs / 2, gc)
+                }
+                if (s.id == Tool.CAN) bar(c, sx + 5 * u, hy + slot - 10 * u, sx + slot - 5 * u, hy + slot - 4 * u, g.water.toFloat() / g.waterMax, 0xFF4A9AE0.toInt())
             }
             btn(sx, hy, sx + slot, hy + slot) { g.sel = si }
         }
-        val rx = hx + slot * n + 2 * u
-        text(c, "${hotRow + 1}", rx + 12 * u, hy + slot / 2 + 5 * u, 14f, INK, Paint.Align.CENTER)
-        btn(rx, hy, rx + 26 * u, hy + slot) { hotRow = (hotRow + 1) % 3; g.sel = hotRow * 8 }
+        val rx = hx + slot * n + 4 * u
+        button(c, rx, hy + 3 * u, rx + 24 * u, hy + slot - 3 * u, "${hotRow + 1}", col = 0xFFB0783E.toInt(), size = 14f) { hotRow = (hotRow + 1) % 3; g.sel = hotRow * 8 }
         // held item name
-        g.held?.let { text(c, Items[it.id].name, W / 2f, hy - 12 * u, 12f, Color.WHITE, Paint.Align.CENTER, true) }
+        g.held?.let { text(c, Items[it.id].name, W / 2f, hy - 16 * u, 12f, Color.WHITE, Paint.Align.CENTER, true) }
 
-        // buttons
+        // touch buttons
         if (g.mode == Mode.PLAY) {
-            fill.color = 0x70000000; c.drawCircle(aBtn.centerX() + 2 * u, aBtn.centerY() + 3 * u, aBtn.width() / 2, fill)
-            fill.color = if (aId >= 0) 0xFF3E8C3A.toInt() else 0xFF5DA342.toInt(); c.drawCircle(aBtn.centerX(), aBtn.centerY(), aBtn.width() / 2, fill)
-            stroke.color = 0xFF2E5E2A.toInt(); stroke.strokeWidth = 3 * u; c.drawCircle(aBtn.centerX(), aBtn.centerY(), aBtn.width() / 2, stroke)
-            text(c, contextLabel(), aBtn.centerX(), aBtn.centerY() + 5 * u, 14f, Color.WHITE, Paint.Align.CENTER, true)
-            fill.color = 0x70000000; c.drawCircle(bBtn.centerX() + 2 * u, bBtn.centerY() + 3 * u, bBtn.width() / 2, fill)
-            fill.color = 0xFFB0783E.toInt(); c.drawCircle(bBtn.centerX(), bBtn.centerY(), bBtn.width() / 2, fill)
+            val ad = max(16, Math.round(aBtn.width() / hs))
+            val ab = roundBmp(ad, 0xFF5DA342.toInt(), aId >= 0)
+            bmp(c, ab, aBtn.centerX() - ad * hs / 2f, aBtn.centerY() - ad * hs / 2f, (ad * hs).toFloat(), ((ad + 2) * hs).toFloat())
+            text(c, contextLabel(), aBtn.centerX(), aBtn.centerY() + 5 * u + (if (aId >= 0) hs else 0), 14f, Color.WHITE, Paint.Align.CENTER, true)
+            val bd = max(12, Math.round(bBtn.width() / hs))
+            bmp(c, roundBmp(bd, 0xFFB0783E.toInt(), false), bBtn.centerX() - bd * hs / 2f, bBtn.centerY() - bd * hs / 2f, (bd * hs).toFloat(), ((bd + 2) * hs).toFloat())
             text(c, "Menu", bBtn.centerX(), bBtn.centerY() + 4 * u, 11f, Color.WHITE, Paint.Align.CENTER, true)
             btn(bBtn.left, bBtn.top, bBtn.right, bBtn.bottom) { g.mode = Mode.MENU; g.menuSel = -1; listOff = 0 }
             // joystick
             if (joyId >= 0) {
-                fill.color = 0x40FFFFFF; c.drawCircle(joyOx, joyOy, 46 * u, fill)
-                fill.color = 0x90FFFFFF.toInt(); c.drawCircle(joyOx + joyX * 46 * u, joyOy + joyY * 46 * u, 18 * u, fill)
+                val rd = Math.round(92 * u / hs)
+                val ring = roundCache.getOrPut("ring$rd") { Hud.ring(rd).bmp() }
+                bmp(c, ring, joyOx - rd * hs / 2f, joyOy - rd * hs / 2f, (rd * hs).toFloat(), (rd * hs).toFloat())
+                val kd = Math.round(36 * u / hs)
+                bmp(c, roundBmp(kd, 0xFFE8DCC8.toInt(), false, 220), joyOx + joyX * 46 * u - kd * hs / 2f, joyOy + joyY * 46 * u - kd * hs / 2f, (kd * hs).toFloat(), ((kd + 2) * hs).toFloat())
             }
         }
         // banner
         g.banner?.let {
-            val w = max(220 * u, txt.apply { textSize = 13 * u }.measureText(it) + 40 * u)
-            panel(c, W / 2f - w / 2, 10 * u, W / 2f + w / 2, 40 * u)
-            text(c, it, W / 2f, 30 * u, 13f, INK, Paint.Align.CENTER)
+            val w = max(220 * u, txt.apply { textSize = 13 * u }.measureText(it) + 44 * u)
+            panel(c, W / 2f - w / 2, 8 * u, W / 2f + w / 2, 44 * u)
+            text(c, it, W / 2f, 31 * u, 13f, INK, Paint.Align.CENTER)
         }
         // update bar
         val up = Updater.available
         if (up != null && !updateDismissed && g.mode == Mode.PLAY) {
-            val w = 300 * u; val l2 = W / 2f - w / 2; val t2 = 46 * u
-            panel(c, l2, t2, l2 + w, t2 + 40 * u, 0xFFDFF2D0.toInt())
+            val w = 310 * u; val l2 = W / 2f - w / 2; val t2 = 50 * u
+            panel(c, l2, t2, l2 + w, t2 + 46 * u, 0xFFDFF2D0.toInt())
             val msg = if (Updater.busy) "Downloading ${(Updater.progress * 100).toInt().coerceAtLeast(0)}%" else "Update ${up.tag} available"
-            text(c, msg, l2 + 12 * u, t2 + 26 * u, 13f)
+            text(c, msg, l2 + 14 * u, t2 + 28 * u, 13f)
             if (!Updater.busy) {
-                button(c, l2 + w - 140 * u, t2 + 8 * u, l2 + w - 74 * u, t2 + 32 * u, "Update", size = 11f) { host.installUpdate(up) }
-                button(c, l2 + w - 68 * u, t2 + 8 * u, l2 + w - 10 * u, t2 + 32 * u, "Later", col = 0xFF9A7A5A.toInt(), size = 11f) { updateDismissed = true }
+                button(c, l2 + w - 146 * u, t2 + 10 * u, l2 + w - 78 * u, t2 + 36 * u, "Update", size = 11f) { host.installUpdate(up) }
+                button(c, l2 + w - 72 * u, t2 + 10 * u, l2 + w - 12 * u, t2 + 36 * u, "Later", col = 0xFF9A7A5A.toInt(), size = 11f) { updateDismissed = true }
             }
         }
     }
@@ -570,6 +665,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             o == Ob.BIN -> "Ship"
             o == Ob.LADDER -> "Down"
             o == Ob.LADDERUP -> "Up"
+            o == Ob.STOVE -> "Cook"
             o in setOf(Ob.BOX, Ob.CHEST, Ob.HEALER, Ob.ELEVATOR, Ob.ANVIL, Ob.COUNTER) -> "Open"
             else -> "Use"
         }
@@ -585,27 +681,33 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     private fun drawDialog(c: Canvas) {
         val d = g.dialog ?: return
-        val l = 40 * u; val r = W - 40 * u; val t = H - 128 * u; val b = H - 14 * u
+        val l = 40 * u; val r = W - 40 * u; val t = H - 134 * u; val b = H - 12 * u
         fill.color = 0x50000000; c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), fill)
         panel(c, l, t, r, b)
-        var ty = t + 26 * u
+        var ty = t + 30 * u
         if (d.speaker != null) {
             val n = d.speaker
             val npc = g.npcs.firstOrNull { it.name == n }
             if (npc != null) {
-                panel(c, l, t - 92 * u, l + 86 * u, t - 4 * u)
-                bmp(c, People.portraits[npc.key]!!, l + 11 * u, t - 88 * u, 64 * u, 88 * u)
+                panel(c, l, t - 100 * u, l + 90 * u, t - 4 * u)
+                bmp(c, People.portraits[npc.key]!!, l + 13 * u, t - 94 * u, 64 * u, 88 * u)
             }
-            text(c, n, l + 14 * u, ty, 14f, 0xFF8E3A1E.toInt()); ty += 20 * u
+            // wooden name plaque riding on the top edge of the box
+            txt.textSize = 13 * u
+            val nw = txt.measureText(n) + 30 * u
+            val nx = if (npc != null) l + 100 * u else l + 14 * u
+            nine(c, btnBmp(0xFF9A5E30.toInt()), Hud.BUTTON_K, nx, t - 14 * u, nx + nw, t + 14 * u)
+            text(c, n, nx + nw / 2, t + 4 * u, 13f, 0xFFFFF0D0.toInt(), Paint.Align.CENTER, true)
+            ty += 6 * u
         }
-        for (line in wrap(d.pages[d.page], r - l - 40 * u, 14f).take(4)) { text(c, line, l + 14 * u, ty, 14f); ty += 19 * u }
+        for (line in wrap(d.pages[d.page], r - l - 44 * u, 14f).take(4)) { text(c, line, l + 18 * u, ty, 14f); ty += 19 * u }
         val last = d.page == d.pages.size - 1
         if (last && d.options.isNotEmpty()) {
             var bx = r - 14 * u
             for ((label, act) in d.options.reversed()) {
                 txt.textSize = 13 * u
                 val w = txt.measureText(label) + 30 * u
-                button(c, bx - w, b - 40 * u, bx, b - 12 * u, label) {
+                button(c, bx - w, b - 44 * u, bx, b - 14 * u, label) {
                     g.dialog = null; g.mode = Mode.PLAY
                     act()
                     if (g.mode == Mode.PLAY && g.dialog == null) d.onClose?.invoke()
@@ -613,7 +715,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
                 bx -= w + 10 * u
             }
         } else {
-            text(c, "▼", r - 20 * u, b - 12 * u, 12f, 0xFF8E3A1E.toInt(), Paint.Align.CENTER)
+            val bob = if ((g.frame * 3).toInt() % 2 == 0) 0 else hs
+            icon(c, iArrow, r - 22 * u - iArrow.width * hs / 2f, b - 22 * u + bob)
             btn(0f, 0f, W.toFloat(), H.toFloat()) { if (last) closeDialog() else d.page++ }
         }
     }
@@ -625,8 +728,10 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         btn(0f, 0f, W.toFloat(), H.toFloat()) {} // swallow
         val l = (W - w) / 2; val t = (H - h) / 2
         panel(c, l, t, l + w, t + h)
-        text(c, title, l + 18 * u, t + 28 * u, 18f, 0xFF8E3A1E.toInt())
-        button(c, l + w - 44 * u, t + 10 * u, l + w - 12 * u, t + 40 * u, "X", col = 0xFFC0503A.toInt()) { g.mode = Mode.PLAY; g.menuSel = -1 }
+        text(c, title, l + 20 * u, t + 32 * u, 18f, 0xFF8E3A1E.toInt())
+        val xl = l + w - 50 * u; val xt = t + 12 * u
+        button(c, xl, xt, xl + 36 * u, xt + 32 * u, "", col = 0xFFC0503A.toInt()) { g.mode = Mode.PLAY; g.menuSel = -1 }
+        icon(c, iX, xl + 18 * u - iX.width * hs / 2f, xt + 15 * u - iX.height * hs / 2f - hs)
         return RectF(l, t, l + w, t + h)
     }
 
@@ -636,11 +741,11 @@ class Ui(val g: Game, val art: Art, val host: Host) {
 
     private fun drawMenu(c: Canvas) {
         val r = overlay(c, "")
-        var tx = r.left + 14 * u
+        var tx = r.left + 16 * u
         for ((i, name) in tabs.withIndex()) {
             txt.textSize = 13 * u
             val w = txt.measureText(name) + 26 * u
-            button(c, tx, r.top + 10 * u, tx + w, r.top + 40 * u, name, col = if (g.menuTab == i) 0xFFB0783E.toInt() else 0xFF8E7A62.toInt()) {
+            button(c, tx, r.top + 12 * u, tx + w, r.top + 42 * u, name, col = if (g.menuTab == i) 0xFFB0783E.toInt() else 0xFF8E7A62.toInt()) {
                 g.menuTab = i; g.menuSel = -1; listOff = 0; dexPick = -1
             }
             tx += w + 6 * u
@@ -659,8 +764,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     private fun slotGrid(c: Canvas, inv: Inventory, l: Float, t: Float, size: Float, cols: Int, selected: Int, onTap: (Int) -> Unit) {
         for (i in 0 until inv.size) {
             val x = l + (i % cols) * size; val y = t + (i / cols) * size
-            fill.color = if (i == selected) 0xFFFFE07A.toInt() else if (i / cols == 0) 0xFFEBD7A8.toInt() else 0xFFE0C896.toInt()
-            c.drawRoundRect(x + 2 * u, y + 2 * u, x + size - 2 * u, y + size - 2 * u, 4 * u, 4 * u, fill)
+            slotBg(c, x + 1 * u, y + 1 * u, x + size - 1 * u, y + size - 1 * u, i == selected)
             val s = inv.slots[i]
             if (s != null) {
                 bmp(c, art.item(s.id), x + 5 * u, y + 5 * u, size - 10 * u, size - 10 * u)
@@ -704,8 +808,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val lw = a.width() * 0.55f
         for ((i, m) in g.party.withIndex()) {
             val y = a.top + i * rowH
-            fill.color = if (i == g.menuSel) 0xFFFFE07A.toInt() else 0xFFEBD7A8.toInt()
-            c.drawRoundRect(a.left, y + 2 * u, a.left + lw, y + rowH - 2 * u, 5 * u, 5 * u, fill)
+            rowBg(c, a.left, y + 2 * u, a.left + lw, y + rowH - 2 * u, i == g.menuSel)
             bmp(c, art.mon(m.speciesId)[0], a.left + 4 * u, y + 2 * u, rowH - 4 * u, rowH - 4 * u)
             text(c, "${m.name}${if (i == 0) "  (following)" else ""}", a.left + rowH + 4 * u, y + rowH * 0.42f, 13f)
             text(c, "${m.sp.name} · ${m.sp.type.label} · Lv${m.level} · ${m.sp.job.label}", a.left + rowH + 4 * u, y + rowH * 0.78f, 10f, 0xFF6E5A48.toInt())
@@ -737,7 +840,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     private fun typeChip(c: Canvas, t: EType, x: Float, y: Float) {
         txt.textSize = 10 * u
         val w = txt.measureText(t.label) + 14 * u
-        fill.color = t.color; c.drawRoundRect(x, y, x + w, y + 16 * u, 8 * u, 8 * u, fill)
+        nine(c, btnBmp(t.color), Hud.BUTTON_K, x, y, x + w, y + 17 * u, max(1, hs / 2))
         text(c, t.label, x + w / 2, y + 12 * u, 10f, Color.WHITE, Paint.Align.CENTER, true)
     }
 
@@ -745,7 +848,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val rowH = min(a.height() / Recipes.list.size, 44 * u)
         for ((i, r) in Recipes.list.withIndex()) {
             val y = a.top + i * rowH
-            fill.color = 0xFFEBD7A8.toInt(); c.drawRoundRect(a.left, y + 2 * u, a.right, y + rowH - 2 * u, 5 * u, 5 * u, fill)
+            rowBg(c, a.left, y + 2 * u, a.right, y + rowH - 2 * u)
             bmp(c, art.item(r.out), a.left + 4 * u, y + 4 * u, rowH - 8 * u, rowH - 8 * u)
             text(c, Items[r.out].name, a.left + rowH + 4 * u, y + rowH * 0.62f, 13f)
             var nx = a.left + a.width() * 0.34f
@@ -766,8 +869,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val size = min(a.width() / cols, (a.height() - 50 * u) / rows)
         for ((i, sp) in Dex.list.withIndex()) {
             val x = a.left + (i % cols) * size; val y = a.top + (i / cols) * size
-            fill.color = if (i == dexPick) 0xFFFFE07A.toInt() else 0xFFEBD7A8.toInt()
-            c.drawRoundRect(x + 2 * u, y + 2 * u, x + size - 2 * u, y + size - 2 * u, 4 * u, 4 * u, fill)
+            slotBg(c, x + 1 * u, y + 1 * u, x + size - 1 * u, y + size - 1 * u, i == dexPick)
             when (sp.id) {
                 in g.dexCaught -> bmp(c, art.mon(sp.id)[0], x + 3 * u, y + 3 * u, size - 6 * u, size - 6 * u)
                 in g.dexSeen -> bmp(c, art.mon(sp.id)[0], x + 3 * u, y + 3 * u, size - 6 * u, size - 6 * u, sil)
@@ -790,23 +892,17 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val rowH = min(a.height() / 5.5f, 48 * u)
         for ((i, n) in g.npcs.withIndex()) {
             val y = a.top + i * rowH
-            fill.color = 0xFFEBD7A8.toInt(); c.drawRoundRect(a.left, y + 2 * u, a.right, y + rowH - 2 * u, 5 * u, 5 * u, fill)
+            rowBg(c, a.left, y + 2 * u, a.right, y + rowH - 2 * u)
             bmp(c, People.portraits[n.key]!!, a.left + 8 * u, y + 3 * u, (rowH - 6 * u) * 16f / 22f, rowH - 6 * u)
             text(c, n.name, a.left + rowH, y + rowH * 0.45f, 14f)
             text(c, "Lives in the ${n.area}" + (if (n.key in g.giftedToday) " · gifted today" else ""), a.left + rowH, y + rowH * 0.8f, 10f, 0xFF6E5A48.toInt())
             val pts = g.friendship[n.key] ?: 0
             for (h in 0 until 10) {
-                val hx = a.left + a.width() * 0.5f + h * 22 * u
-                fill.color = if (h < pts / 250) 0xFFE2483A.toInt() else 0xFFC8B08A.toInt()
-                heart(c, hx, y + rowH / 2, 8 * u)
+                val hx = a.left + a.width() * 0.5f + h * (iHeart.width * hs + 4 * u)
+                icon(c, if (h < pts / 250) iHeart else iHeartE, hx - iHeart.width * hs / 2f, y + rowH / 2 - iHeart.height * hs / 2f)
             }
         }
         text(c, "Talk every day and give gifts to raise friendship. Friends give presents at 3 hearts.", a.left, a.bottom - 4 * u, 10f, 0xFF6E5A48.toInt())
-    }
-
-    private fun heart(c: Canvas, x: Float, y: Float, r: Float) {
-        c.drawCircle(x - r * 0.45f, y - r * 0.2f, r * 0.55f, fill); c.drawCircle(x + r * 0.45f, y - r * 0.2f, r * 0.55f, fill)
-        val p = android.graphics.Path(); p.moveTo(x - r, y); p.lineTo(x + r, y); p.lineTo(x, y + r); p.close(); c.drawPath(p, fill)
     }
 
     private fun drawOptionsTab(c: Canvas, a: RectF) {
@@ -825,6 +921,52 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             "The game saves every time you sleep. Creatures heal overnight and at Wren's fountain in town.",
             "Farm east → Town. Farm south → Forest. Town north → Mountain & Mines. Town south → Beach.")
         for (h in help) for (line in wrap(h, a.width(), 11f)) { text(c, line, a.left, y, 11f, 0xFF6E5A48.toInt()); y += 15 * u }
+    }
+
+    // ---------------------------------------------------------------- kitchen (cooking)
+
+    private fun drawCook(c: Canvas) {
+        val r = overlay(c, "Kitchen")
+        val a = RectF(r.left + 18 * u, r.top + 54 * u, r.right - 18 * u, r.bottom - 30 * u)
+        cookPick = cookPick.coerceIn(0, Cooking.list.size - 1)
+        val size = min(a.height() / 3f, a.width() * 0.42f / 3f)
+        for ((i, d) in Cooking.list.withIndex()) {
+            val x = a.left + (i % 3) * size; val y = a.top + (i / 3) * size
+            slotBg(c, x + 2 * u, y + 2 * u, x + size - 2 * u, y + size - 2 * u, i == cookPick)
+            val ok = g.canCook(d)
+            bmp(c, art.item(d.id), x + 8 * u, y + 6 * u, size - 16 * u, size - 16 * u, if (ok) px else dimP)
+            val bi = iBuff[d.buff]!!
+            icon(c, bi, x + size - 6 * u - bi.width * hs, y + size - 6 * u - bi.height * hs)
+            btn(x, y, x + size, y + size) { cookPick = i }
+        }
+        val d = Cooking.list[cookPick]
+        val ix = a.left + size * 3 + 22 * u; val iw = a.right - ix
+        bmp(c, art.item(d.id), ix, a.top, 48 * u, 48 * u)
+        text(c, d.name, ix + 58 * u, a.top + 20 * u, 16f)
+        text(c, "+${d.energy} energy" + (if (d.heal > 0) " · heals party ${d.heal}" else "") + " · sells ${d.price}g", ix + 58 * u, a.top + 40 * u, 11f, 0xFF6E5A48.toInt())
+        var y = a.top + 58 * u
+        val bi = iBuff[d.buff]!!
+        icon(c, bi, ix, y)
+        text(c, "${d.buff.label} buff · ${d.minutes / 60} hours", ix + bi.width * hs + 6 * u, y + bi.height * hs - 2 * u, 13f, 0xFF3E7A2A.toInt())
+        y += bi.height * hs + 14 * u
+        text(c, d.buff.effect.replaceFirstChar { it.uppercase() }, ix, y, 11f, 0xFF6E5A48.toInt())
+        y += 10 * u
+        text(c, "Ingredients", ix, y + 6 * u, 12f, 0xFF8E3A1E.toInt()); y += 12 * u
+        for ((id, n) in d.needs) {
+            val have = g.ingCount(id)
+            rowBg(c, ix, y, ix + iw, y + 28 * u)
+            val shown = if (id == Cooking.ANY_FISH) (g.inv.slots.filterNotNull().firstOrNull { Items[it.id].kind == Kind.FISH }?.id ?: Fish.list.first().id) else id
+            bmp(c, art.item(shown), ix + 6 * u, y + 4 * u, 20 * u, 20 * u)
+            text(c, Cooking.ingName(id), ix + 32 * u, y + 19 * u, 12f)
+            text(c, "$have/$n", ix + iw - 10 * u, y + 19 * u, 12f, if (have >= n) 0xFF3E7A2A.toInt() else 0xFFC0302A.toInt(), Paint.Align.RIGHT)
+            y += 30 * u
+        }
+        val ok = g.canCook(d)
+        val bt = max(y + 6 * u, a.bottom - 34 * u)
+        button(c, ix, bt, ix + 120 * u, bt + 34 * u, "Cook", ok, size = 14f) { g.cook(d) }
+        text(c, if (ok) "You have everything!" else "Missing ingredients", ix + 130 * u, bt + 15 * u, 11f, if (ok) 0xFF3E7A2A.toInt() else 0xFF8E7A62.toInt())
+        text(c, "In your bag: ${g.inv.count(d.id)} · cooked ${g.dishesCooked} so far", ix + 130 * u, bt + 29 * u, 10f, 0xFF6E5A48.toInt())
+        text(c, "Dishes give energy plus a buff for a few hours. One buff at a time; buffs end when you sleep. Eat from the hotbar or the Items menu.", r.left + 20 * u, r.bottom - 14 * u, 10f, 0xFF6E5A48.toInt())
     }
 
     // ---------------------------------------------------------------- shop
@@ -847,7 +989,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             for ((i, id) in stock.withIndex()) {
                 val x = a.left + (i % cols) * colW; val y = a.top + (i / cols) * rowH
                 val d = Items[id]
-                fill.color = 0xFFEBD7A8.toInt(); c.drawRoundRect(x + 2 * u, y + 2 * u, x + colW - 4 * u, y + rowH - 2 * u, 5 * u, 5 * u, fill)
+                rowBg(c, x + 2 * u, y + 2 * u, x + colW - 4 * u, y + rowH - 2 * u)
                 bmp(c, art.item(id), x + 6 * u, y + 4 * u, rowH - 8 * u, rowH - 8 * u)
                 text(c, d.name, x + rowH + 4 * u, y + rowH * 0.45f, 12f)
                 text(c, "${d.price}g", x + rowH + 4 * u, y + rowH * 0.82f, 11f, 0xFF8A6A12.toInt())
@@ -878,7 +1020,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         val rowH = a.height() / 4
         for ((i, t) in tools.withIndex()) {
             val y = a.top + i * rowH
-            fill.color = 0xFFEBD7A8.toInt(); c.drawRoundRect(a.left, y + 2 * u, a.right, y + rowH - 2 * u, 5 * u, 5 * u, fill)
+            rowBg(c, a.left, y + 2 * u, a.right, y + rowH - 2 * u)
             bmp(c, art.item(t), a.left + 6 * u, y + 4 * u, rowH - 8 * u, rowH - 8 * u)
             text(c, "${Items[t].name} (${g.levelName(g.toolLevel[t])})", a.left + rowH + 6 * u, y + rowH * 0.45f, 13f)
             val cost = g.upgradeCost(t)
@@ -915,7 +1057,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
     }
 
     private fun monRow(c: Canvas, m: Mon, l: Float, t: Float, w: Float, h: Float, act: () -> Unit) {
-        fill.color = 0xFFEBD7A8.toInt(); c.drawRoundRect(l, t + 2 * u, l + w, t + h - 2 * u, 5 * u, 5 * u, fill)
+        rowBg(c, l, t + 2 * u, l + w, t + h - 2 * u)
         bmp(c, art.mon(m.speciesId)[0], l + 2 * u, t + 2 * u, h - 4 * u, h - 4 * u)
         text(c, "${m.name} Lv${m.level}", l + h + 2 * u, t + h * 0.45f, 12f)
         text(c, "${m.sp.name} · ${m.sp.job.label}", l + h + 2 * u, t + h * 0.8f, 10f, 0xFF3E7A2A.toInt())

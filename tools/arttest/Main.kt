@@ -24,7 +24,7 @@ class Sheet(val w: Int, val h: Int) {
 
 private var terrainCache: Terrain? = null
 
-fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: Int, s: Int, out: String, g: Game? = null) {
+fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: Int, s: Int, out: String, g: Game? = null): Sheet {
     val T = 16
     val terrain = terrainCache ?: Terrain(art).also { terrainCache = it }
     val sh = Sheet(tw * T * s, th * T * s); sh.fill(0xFF000000.toInt())
@@ -45,7 +45,7 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
                 Ob.WEED -> art.weed[season]; Ob.STICK -> art.stick; Ob.BUSH -> art.bush[season]; Ob.TALLGRASS -> art.tallGrass[season]
                 Ob.FORAGE, Ob.GOODS -> art.item(a.aux[i]); Ob.FENCE -> art.fence; Ob.BIN -> art.bin; Ob.BOX -> art.box; Ob.COUNTER -> art.counter
                 Ob.HEALER -> art.healer; Ob.ELEVATOR -> art.elevator; Ob.LADDER -> art.ladder; Ob.LADDERUP -> art.ladderUp
-                Ob.FLOWER -> art.flower[a.aux[i] % 3]; Ob.TABLE -> art.table; Ob.ANVIL -> art.anvil; Ob.SHELF -> art.shelf; Ob.CHEST -> art.chest
+                Ob.FLOWER -> art.flower[a.aux[i] % 3]; Ob.TABLE -> art.table; Ob.ANVIL -> art.anvil; Ob.SHELF -> art.shelf; Ob.CHEST -> art.chest; Ob.STOVE -> art.stove
                 Ob.BED -> if (a.o(x, y - 1) == Ob.BED) null else art.bed
                 Ob.FOUNTAIN -> if (a.o(x - 1, y) == Ob.FOUNTAIN || a.o(x, y + 1) == Ob.FOUNTAIN) null else art.fountain[0]
                 else -> null
@@ -70,6 +70,155 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
         }
     }
     sh.save(out)
+    return sh
+}
+
+// ---- HUD mock helpers (mirror Ui.nine / Ui.bar so the sheet matches the game) ----
+fun Sheet.blend(X: Int, Y: Int, c: Int) {
+    val al = c ushr 24; if (al == 0 || X !in 0 until w || Y !in 0 until h) return
+    if (al == 255) { img.setRGB(X, Y, c); return }
+    val d = img.getRGB(X, Y); val t = al / 255f
+    fun ch(sh: Int) = (((c shr sh) and 255) * t + ((d shr sh) and 255) * (1 - t)).toInt()
+    img.setRGB(X, Y, (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0))
+}
+fun Sheet.nine(p: Px, k: Int, l: Int, t: Int, r: Int, b: Int, s: Int, shadow: Boolean = true) {
+    if (shadow) nineRaw(p, k, l + s, t + 2 * s, r + s, b + 2 * s, s, 0x58000000)
+    nineRaw(p, k, l, t, r, b, s, 0)
+}
+fun Sheet.nineRaw(p: Px, k: Int, l: Int, t: Int, r: Int, b: Int, s: Int, tint: Int) {
+    val kx = minOf(k * s, (r - l) / 2); val ky = minOf(k * s, (b - t) / 2)
+    val xs = intArrayOf(l, l + kx, r - kx, r); val ys = intArrayOf(t, t + ky, b - ky, b)
+    val sx = intArrayOf(0, k, p.w - k, p.w); val sy = intArrayOf(0, k, p.h - k, p.h)
+    for (j in 0..2) for (i in 0..2) {
+        val dw = xs[i + 1] - xs[i]; val dh = ys[j + 1] - ys[j]; if (dw <= 0 || dh <= 0) continue
+        for (Y in 0 until dh) for (X in 0 until dw) {
+            val c = p.get(sx[i] + X * (sx[i + 1] - sx[i]) / dw, sy[j] + Y * (sy[j + 1] - sy[j]) / dh)
+            if (c ushr 24 == 0) continue
+            blend(xs[i] + X, ys[j] + Y, if (tint != 0) tint else c)
+        }
+    }
+}
+fun Sheet.px(p: Px, x: Int, y: Int, s: Int) = draw(p.bmp(), x, y, s)
+fun Sheet.text(str: String, x: Int, y: Int, size: Int, col: Int, center: Boolean = false, shadow: Boolean = false) {
+    val gr = img.createGraphics()
+    gr.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING, java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+    gr.font = java.awt.Font("SansSerif", java.awt.Font.BOLD, size)
+    val xx = if (center) x - gr.fontMetrics.stringWidth(str) / 2 else x
+    if (shadow) { gr.color = java.awt.Color(0, 0, 0, 160); gr.drawString(str, xx + 2, y + 2) }
+    gr.color = java.awt.Color(col, true); gr.drawString(str, xx, y); gr.dispose()
+}
+fun Sheet.rect(l: Int, t: Int, r: Int, b: Int, c: Int) { for (y in t until b) for (x in l until r) blend(x, y, c) }
+fun Sheet.bar(l: Int, t: Int, r: Int, b: Int, f: Float, col: Int, s: Int, vertical: Boolean = false) {
+    rect(l, t, r, b, 0xFF2A1A16.toInt()); rect(l + s, t + s, r - s, b - s, 0xFF5A463C.toInt())
+    val rp = Hud.barRamp(col)
+    if (!vertical) {
+        val fw = ((r - l - 2 * s) * f).toInt() / s * s; if (fw <= 0) return
+        rect(l + s, t + s, l + s + fw, b - s, rp[2]); rect(l + s, t + 2 * s, l + s + fw, t + 3 * s, rp[1])
+        rect(l + s, t + s, l + s + fw, t + 2 * s, rp[0]); rect(l + s, b - 2 * s, l + s + fw, b - s, rp[4])
+    } else {
+        val fh = ((b - t - 2 * s) * f).toInt() / s * s; if (fh <= 0) return
+        val ft = b - s - fh
+        rect(l + s, ft, r - s, b - s, rp[2]); rect(l + 2 * s, ft, l + 3 * s, b - s, rp[1])
+        rect(l + s, ft, l + 2 * s, b - s, rp[0]); rect(r - 2 * s, ft, r - s, b - s, rp[4]); rect(l + s, ft, r - s, ft + s, rp[0])
+    }
+}
+
+/** Mock of the in-game HUD (Ui.drawHud) at u = 2, hs = 3 over a farm render, plus the kitchen screen. */
+fun renderHud(art: Art, g: Game, out: String) {
+    val farm = g.areas["farm"]!!
+    val bg = renderArea(art, farm, 0, 4, 2, 20, 12, 4, "$out/hud_bg.png", g)
+    java.io.File("$out/hud_bg.png").delete()
+    val sh = Sheet(1280, 720); sh.img.graphics.drawImage(bg.img, 0, -24, null)
+    val u = 2; val hs = Hud.scaleFor(2f)
+    val INK = 0xFF3A2416.toInt()
+    // date plaque
+    val l = 8 * u; val t = 8 * u; val pw = 158 * u; val ph = 76 * u
+    sh.nine(Hud.panel(), Hud.PANEL_K, l, t, l + pw, t + ph, hs)
+    val ix = l + 12 * u
+    sh.px(Hud.season(0), ix, t + 11 * u, hs); sh.text("Spring 12 · Y1", ix + 9 * hs + 5 * u, t + 23 * u, 26, INK)
+    sh.text("9:40 am", ix, t + 45 * u, 32, INK); sh.px(Hud.sun, l + pw - 12 * u - 11 * hs, t + 46 * u - 11 * hs, hs)
+    sh.rect(ix, t + 50 * u, l + pw - 12 * u, t + 50 * u + 1, 0xFFD8BE8A.toInt())
+    sh.px(Hud.coin, ix, t + 53 * u, hs); sh.text("1,250g", ix + 9 * hs + 5 * u, t + 65 * u, 26, 0xFF8A6A12.toInt())
+    sh.text("Farm", l + pw - 12 * u - 30, t + 65 * u, 20, 0xFF6E5A48.toInt())
+    var py = t + ph + 5 * u
+    sh.nine(Hud.panel(), Hud.PANEL_K, l, py, l + pw, py + 44 * u, hs)
+    sh.draw(art.mon(g.party[0].speciesId)[0], l + 8 * u, py + 6 * u, u)
+    sh.text("${g.party[0].name} Lv${g.party[0].level}", l + 44 * u, py + 21 * u, 21, INK)
+    sh.bar(l + 44 * u, py + 25 * u, l + pw - 12 * u, py + 33 * u, 0.7f, 0xFF5DD45A.toInt(), 2)
+    py += 49 * u
+    sh.nine(Hud.panel(), Hud.PANEL_K, l, py, l + pw, py + 36 * u, hs)
+    sh.px(Hud.buff(Buff.SPEED), l + 12 * u, py + 18 * u - 9 * hs / 2, hs); sh.text("Swift  2h 35m", l + 12 * u + 9 * hs + 6 * u, py + 23 * u, 24, 0xFF3E7A2A.toInt())
+    // energy / health
+    val W = 1280; val H = 720
+    val el = W - 52 * u; val et = 8 * u; val eb = 164 * u
+    sh.nine(Hud.panel(), Hud.PANEL_K, el, et, W - 8 * u, eb, hs)
+    val cx1 = el + 16 * u; val cx2 = el + 30 * u
+    sh.px(Hud.bolt(), cx1 - 8 * hs / 2, et + 11 * u, hs); sh.px(Hud.heart(true), cx2 - 9 * hs / 2, et + 12 * u, hs)
+    sh.bar(cx1 - 5 * u, et + 32 * u, cx1 + 5 * u, eb - 11 * u, 0.8f, 0xFF5DC44A.toInt(), 2, true)
+    sh.bar(cx2 - 5 * u, et + 32 * u, cx2 + 5 * u, eb - 11 * u, 1f, 0xFFE2483A.toInt(), 2, true)
+    // hotbar
+    val slot = 38 * u; val n = 8
+    val hx = W / 2 - slot * n / 2 - 18 * u; val hy = H - slot - 12 * u
+    sh.nine(Hud.panel(), Hud.PANEL_K, hx - 10 * u, hy - 10 * u, hx + slot * n + 38 * u, hy + slot + 10 * u, hs)
+    for (i in 0 until n) {
+        val sx = hx + i * slot
+        sh.nine(Hud.slot(i == 2), Hud.SLOT_K, sx + u, hy + u, sx + slot - u, hy + slot - u, hs, false)
+        val s = g.inv.slots[i] ?: continue
+        sh.draw(art.item(s.id), sx + 5 * u + 3, hy + 4 * u + 3, 4)
+        if (s.n > 1) sh.text("${s.n}", sx + slot - 22, hy + slot - 8, 20, 0xFFFFFFFF.toInt(), shadow = true)
+    }
+    val rx = hx + slot * n + 4 * u
+    sh.nine(Hud.button(0xFFB0783E.toInt()), Hud.BUTTON_K, rx, hy + 3 * u, rx + 24 * u, hy + slot - 3 * u, hs, false)
+    sh.text("1", rx + 12 * u, hy + slot / 2 + 8, 28, 0xFFFFFFFF.toInt(), true, true)
+    // A / Menu buttons
+    val ad = Math.round(62f * u / hs)
+    sh.px(Hud.round(ad, 0xFF5DA342.toInt()), W - 62 * u - 18 * u, H - 62 * u - 34 * u, hs)
+    sh.text("Use", W - 49 * u, H - 61 * u, 28, 0xFFFFFFFF.toInt(), true, true)
+    val bd = Math.round(62f * 0.62f * u / hs)
+    sh.px(Hud.round(bd, 0xFFB0783E.toInt()), W - (62 * 0.62f).toInt() * u - 26 * u - 62 * u, H - (62 * 0.62f).toInt() * u - 72 * u, hs)
+    // dialog sample
+    val dl = 40 * u; val dr = W - 40 * u; val dt = H - 134 * u - 60 * u; val db = H - 12 * u - 60 * u
+    sh.nine(Hud.panel(), Hud.PANEL_K, dl, dt, 640, db, hs)
+    sh.nine(Hud.button(0xFF9A5E30.toInt()), Hud.BUTTON_K, dl + 14 * u, dt - 14 * u, dl + 84 * u, dt + 14 * u, hs, false)
+    sh.text("Wren", dl + 49 * u, dt + 4 * u, 26, 0xFFFFF0D0.toInt(), true, true)
+    sh.text("Morning! The stove in your kitchen", dl + 18 * u, dt + 36 * u, 28, INK)
+    sh.text("works again, you know.", dl + 18 * u, dt + 55 * u, 28, INK)
+    sh.px(Hud.arrow, 640 - 22 * u - 7 * hs / 2, db - 22 * u, hs)
+    for ((k, h) in listOf(true, true, true, false, false).withIndex()) sh.px(Hud.heart(h), 700 + k * (9 * hs + 8), 520, hs)
+    sh.save("$out/hud.png")
+
+    // kitchen screen
+    val ks = Sheet(1280, 720); ks.img.graphics.drawImage(bg.img, 0, -24, null); ks.rect(0, 0, 1280, 720, 0x80000000.toInt())
+    val ow = (1280 * 0.86f).toInt(); val oh = (720 * 0.86f).toInt(); val ol = (1280 - ow) / 2; val ot = (720 - oh) / 2
+    ks.nine(Hud.panel(), Hud.PANEL_K, ol, ot, ol + ow, ot + oh, hs)
+    ks.text("Kitchen", ol + 20 * u, ot + 32 * u, 36, 0xFF8E3A1E.toInt())
+    ks.nine(Hud.button(0xFFC0503A.toInt()), Hud.BUTTON_K, ol + ow - 50 * u, ot + 12 * u, ol + ow - 14 * u, ot + 44 * u, hs, false)
+    ks.px(Hud.xmark, ol + ow - 32 * u - 9 * hs / 2, ot + 27 * u - 9 * hs / 2 - hs, hs)
+    val al = ol + 18 * u; val at = ot + 54 * u; val ab = ot + oh - 30 * u
+    val size = minOf((ab - at) / 3, ((ow - 36 * u) * 0.42f / 3).toInt())
+    for ((i, d) in Cooking.list.withIndex()) {
+        val x = al + (i % 3) * size; val y = at + (i / 3) * size
+        ks.nine(Hud.slot(i == 4), Hud.SLOT_K, x + 2 * u, y + 2 * u, x + size - 2 * u, y + size - 2 * u, hs, false)
+        val isc = (size - 16 * u) / 16; ks.draw(art.item(d.id), x + (size - 16 * isc) / 2, y + 6 * u, isc)
+        ks.px(Hud.buff(d.buff), x + size - 6 * u - 9 * hs, y + size - 6 * u - 9 * hs, hs)
+    }
+    val d = Cooking.list[4]; val dx = al + size * 3 + 22 * u; val dr2 = ol + ow - 18 * u
+    ks.draw(art.item(d.id), dx, at, 6)
+    ks.text(d.name, dx + 58 * u, at + 20 * u, 32, INK); ks.text("+${d.energy} energy · sells ${d.price}g", dx + 58 * u, at + 40 * u, 22, 0xFF6E5A48.toInt())
+    var y = at + 58 * u
+    ks.px(Hud.buff(d.buff), dx, y, hs); ks.text("${d.buff.label} buff · ${d.minutes / 60} hours", dx + 9 * hs + 6 * u, y + 9 * hs - 2 * u, 26, 0xFF3E7A2A.toInt())
+    y += 9 * hs + 14 * u; ks.text(d.buff.effect.replaceFirstChar { it.uppercase() }, dx, y, 22, 0xFF6E5A48.toInt()); y += 10 * u
+    ks.text("Ingredients", dx, y + 6 * u, 24, 0xFF8E3A1E.toInt()); y += 12 * u
+    for ((id, nn) in d.needs) {
+        ks.nine(Hud.row(false), Hud.ROW_K, dx, y, dr2, y + 28 * u, hs, false)
+        ks.draw(art.item(id), dx + 6 * u + 4, y + 4 * u + 4, 2)
+        ks.text(Cooking.ingName(id), dx + 32 * u, y + 19 * u, 24, INK); ks.text("$nn/$nn", dr2 - 30 * u, y + 19 * u, 24, 0xFF3E7A2A.toInt())
+        y += 30 * u
+    }
+    val bt = maxOf(y + 6 * u, ab - 34 * u)
+    ks.nine(Hud.button(0xFF5DA342.toInt()), Hud.BUTTON_K, dx, bt, dx + 120 * u, bt + 34 * u, hs, false)
+    ks.text("Cook", dx + 60 * u, bt + 21 * u, 28, 0xFFFFFFFF.toInt(), true, true)
+    ks.save("$out/kitchen.png")
 }
 
 fun main(args: Array<String>) {
@@ -237,9 +386,53 @@ fun main(args: Array<String>) {
     val goodsOk = introLines == 1 && goodsTiles.size >= 6 && inPen && picked && kinds.size == 3
     println("CHECK goods: " + if (goodsOk) "PASS" else "FAIL")
     renderArea(art, farmA, 0, 26, 6, 18, 12, 4, "$out/pen_goods.png")
+    // cooking sim: stove in the farmhouse, first-use intro, cook three dishes (one with "any fish"), eat for buffs
+    val house = g.areas["house"]!!
+    val stoveOk = house.o(10, 2) == Ob.STOVE
+    g.cur = house; g.px = 10.5f; g.py = 3.5f; g.dir = 1; g.mode = Mode.PLAY
+    val tipShown = g.cookTip
+    g.action()
+    val introPages = if (g.mode == Mode.DIALOG) g.dialog?.pages?.size ?: 0 else 0
+    g.dialog?.let { d -> g.dialog = null; g.mode = Mode.PLAY; d.onClose?.invoke() }
+    val opened = g.mode == Mode.COOK
+    g.mode = Mode.PLAY; g.action(); val reopenedNoIntro = g.mode == Mode.COOK
+    g.give(Items.produce(4), 2, true); g.give(Items.FIBER, 1, true); g.give(Items.produce(8), 1, true); g.give(54, 1, true)
+    val fishBefore = Fish.list.sumOf { g.inv.count(it.id) }
+    val cheapest = Fish.list.filter { g.inv.count(it.id) > 0 }.minByOrNull { it.price }!!
+    val cheapBefore = g.inv.count(cheapest.id)
+    val soup = Cooking.byId[163]!!; val gfish = Cooking.byId[162]!!; val pie = Cooking.byId[165]!!; val tart = Cooking.byId[164]!!
+    val cooked = listOf(g.cook(soup), g.cook(gfish), g.cook(pie))
+    val tartRefused = !g.cook(tart)
+    val fishUsed = fishBefore - Fish.list.sumOf { g.inv.count(it.id) } == 1 && g.inv.count(cheapest.id) == cheapBefore - 1
+    val dishesInBag = listOf(163, 162, 165).all { g.inv.count(it) == 1 } && g.inv.count(Items.produce(4)) == 0
+    // eat the pie from the hotbar: Miner buff, +1 pick power
+    g.mode = Mode.PLAY; g.energy = 50f
+    g.sel = g.inv.slots.indexOfFirst { it?.id == 165 }; g.useHeld(); g.dialog!!.options.first().second.invoke(); g.dialog = null; g.mode = Mode.PLAY
+    val pieBuff = g.buff == Buff.MINING && g.energy >= 50f + pie.energy - 1 && g.inv.count(165) == 0
+    g.enterMine(2)
+    val rockI = g.cur.obj.indices.first { g.cur.obj[it] == Ob.ROCK && g.cur.obj.getOrNull(it + g.cur.w) == Ob.NONE }
+    g.cur.aux[rockI] = 10; g.px = rockI % g.cur.w + 0.5f; g.py = rockI / g.cur.w + 1.5f; g.dir = 1
+    g.sel = g.inv.slots.indexOfFirst { it?.id == Tool.PICK }; g.action()
+    val minerHit = 10 - g.cur.aux[rockI]   // basic pick 1 + buff 1 (+1 if lead is a miner)
+    // stamina halves tool energy; speed makes you walk further
+    g.buff = Buff.STAMINA; g.buffUntil = g.time + 60; val e0 = g.energy; g.action(); val stamCost = e0 - g.energy
+    g.warp("farm", 20.5f, 20.5f, 0); g.mode = Mode.PLAY
+    for (x in 18..28) for (y in 19..22) { g.cur.setO(x, y, Ob.NONE); g.cur.crops.remove(g.cur.idx(x, y)); if (g.cur.g(x, y) != Gr.GRASS) g.cur.setG(x, y, Gr.GRASS) }
+    g.buff = null; val x0 = g.px; repeat(10) { g.update(0.05f, 1f, 0f) }; val plain = g.px - x0
+    g.px = 20.5f; g.py = 20.5f; g.buff = Buff.SPEED; g.buffUntil = g.time + 60; val x1 = g.px; repeat(10) { g.update(0.05f, 1f, 0f) }; val fast = g.px - x1
+    // buff wears off when its time is up, and at bedtime
+    g.buffUntil = g.time + 1f; repeat(60) { g.update(0.05f, 0f, 0f) }; val expired = g.buff == null
+    g.buff = Buff.LUCK; g.buffUntil = g.time + 300; g.endDay(false); g.mode = Mode.PLAY
+    val clearedAtNight = g.buff == null && g.report.none { it.startsWith("NEW: Grandma's old stove") }
+    println("cooking: stove=$stoveOk tipInReport=$tipShown intro=$introPages opened=$opened reopen=$reopenedNoIntro cooked=$cooked tartRefused=$tartRefused fishUsed=$fishUsed(${cheapest.name}) bag=$dishesInBag")
+    println("cooking: pieBuff=$pieBuff minerHit=$minerHit stamCost=$stamCost speed=${"%.2f".format(plain)}->${"%.2f".format(fast)} expired=$expired night=$clearedAtNight count=${g.dishesCooked}")
+    val cookOk = stoveOk && tipShown && introPages == 3 && opened && reopenedNoIntro && cooked.all { it } && tartRefused && fishUsed && dishesInBag &&
+        pieBuff && minerHit >= 2 && stamCost in 0.9f..1.1f && fast > plain * 1.15f && expired && clearedAtNight && g.dishesCooked == 3
+    println("CHECK cooking: " + if (cookOk) "PASS" else "FAIL")
     // save/load roundtrip
     g.save()
     val g2 = Game(f)
+    println("loaded cooking: tip=${g2.cookTip} intro=${g2.cookIntro} cooked=${g2.dishesCooked} stove=${g2.areas["house"]!!.o(10, 2) == Ob.STOVE}")
     println("loaded goods: ${g2.areas["farm"]!!.obj.count { it == Ob.GOODS }} (was ${farmA.obj.count { it == Ob.GOODS }}) tip=${g2.goodsIntro}")
     println("loaded fish: caught=${g2.fishCaught} intro=${g2.fishIntro} rod=${g2.hasRod()} (match=${g2.fishCaught == g.fishCaught})")
     println("loaded: day=${g2.day} gold=${g2.gold} party=${g2.party.size} mode=${g2.mode} crops=${g2.areas["farm"]!!.crops.size}")
@@ -253,6 +446,7 @@ fun main(args: Array<String>) {
     renderArea(art, g.areas["mountain"]!!, 3, 0, 0, 42, 30, 2, "$out/mountain_winter.png")
     renderArea(art, g.areas["house"]!!, 0, 0, 0, 12, 9, 4, "$out/house.png")
     renderArea(art, g.areas["store"]!!, 0, 0, 0, 12, 9, 4, "$out/store.png", g)
+    renderHud(art, g, out)
     // close-up near the house at gameplay zoom
     g.cur = farm; g.px = 12.5f; g.py = 10.5f
     renderArea(art, farm, 0, 4, 2, 20, 12, 5, "$out/farm_close.png", g)
