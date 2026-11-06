@@ -113,6 +113,7 @@ class Terrain(private val art: Art) {
     fun tile(a: Area, x: Int, y: Int, season: Int, wf: Int): Bitmap? {
         val i = a.idx(x, y); val gr = a.ground[i]
         if (gr == Gr.VOID) return null
+        if (a.indoor && (gr == Gr.INWALL || gr == Gr.WOOD)) return Interior.tile(a, x, y)
         val v = (x * 7 + y * 13) and 3
         val wet = gr == Gr.TILLED && a.watered[i]
         val f = if (watery(gr)) ((wf % 3) + 3) % 3 else 0

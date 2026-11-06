@@ -446,6 +446,9 @@ fun main(args: Array<String>) {
     renderArea(art, g.areas["mountain"]!!, 3, 0, 0, 42, 30, 2, "$out/mountain_winter.png")
     renderArea(art, g.areas["house"]!!, 0, 0, 0, 12, 9, 4, "$out/house.png")
     renderArea(art, g.areas["store"]!!, 0, 0, 0, 12, 9, 4, "$out/store.png", g)
+    renderArea(art, g.areas["center"]!!, 0, 0, 0, 12, 9, 4, "$out/center.png", g)
+    val badGrids = Interior.grids.filter { (_, rows) -> rows.any { it.length != rows[0].length } }.keys
+    println("interior grids: ${Interior.grids.size} ok=${badGrids.isEmpty()} $badGrids")
     renderHud(art, g, out)
     // close-up near the house at gameplay zoom
     g.cur = farm; g.px = 12.5f; g.py = 10.5f

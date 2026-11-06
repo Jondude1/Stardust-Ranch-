@@ -71,19 +71,19 @@ class Art {
     val bush = Array(4) { s -> bushSprite(s) }
     val tallGrass = Array(4) { s -> tallGrassSprite(s) }
     val fence = fenceSprite()
-    val bed = bedSprite()
+    val bed = Interior.bed()
     val bin = binSprite()
     val box = boxSprite()
-    val counter = counterSprite()
-    val healer = healerSprite()
+    val counter = Interior.counter()
+    val healer = Interior.healer()
     val elevator = elevatorSprite()
     val ladder = ladderSprite(false)
     val ladderUp = ladderSprite(true)
     val flower = Array(3) { i -> flowerSprite(i) }
-    val table = tableSprite()
+    val table = Interior.table()
     val anvil = anvilSprite()
     val fountain = Array(3) { f -> fountainSprite(f) }
-    val shelf = shelfSprite()
+    val shelf = Interior.shelf()
     val chest = chestSprite()
     val stove: Bitmap = Hud.stove.bmp()
 
