@@ -73,6 +73,12 @@ class FishingState(val loc: Int, val bx: Int, val by: Int) {
     fun inZone(): Boolean { val d = ((angle - zone) % 360f + 540f) % 360f - 180f; return abs(d) <= zoneW / 2f }
 }
 
+/** A creature carrying the player across water: glides from (sx, sy) to (tx, ty). */
+class Ferry(val sx: Float, val sy: Float, val tx: Float, val ty: Float, val mon: Mon) {
+    var t = 0f
+    val dur: Float get() = 0.25f + kotlin.math.hypot(tx - sx, ty - sy) / 4.5f
+}
+
 class Game(val saveFile: File) {
     val rng = Random(System.nanoTime())
     var seed = rng.nextInt()
@@ -140,6 +146,14 @@ class Game(val saveFile: File) {
     var trialIntro = false   // first-talk explanation from a ranger shown
     val trialsToday = HashSet<String>()
     val rangers = ArrayList<Npc>()
+    // overworld creature abilities (Abilities.kt)
+    var fieldTip = false     // morning-report announcement shown
+    var fieldIntro = false   // first-encounter explanation shown
+    var fieldUses = 0
+    var ferry: Ferry? = null
+    // effects
+    val particles = ArrayList<Particle>()
+    private var stepAcc = 0f
 
     // ui
     var mode = Mode.STARTER
@@ -241,7 +255,8 @@ class Game(val saveFile: File) {
                 "The creature at the front of your party follows you and lends a hand.",
                 "Some creatures only come out at night. Try the forest after 8pm.",
                 "The fountain here will heal your whole party for free, any time.",
-                "Creatures living in your ranch pen make little goods overnight when they're happy. The stronger your bond, the more you'll find."), Items.STAR_ORB to 1))
+                "Creatures living in your ranch pen make little goods overnight when they're happy. The stronger your bond, the more you'll find.",
+                "Creatures help you explore too: Leaf and Gale ones cut thorns, Stone ones smash crags, Tide and Frost ones carry you over water, and Flame or Spark ones light the mines."), Items.STAR_ORB to 1))
         npcs.add(Npc("gus", "Gus", "town", 30.5f, 7.5f, setOf(Items.GOLD, Items.produce(7)), setOf(Items.COPPER, Items.IRON, Items.COAL),
             listOf("Bring me ore and coin and I'll make your tools sing.", "Copper first, then iron, then gold. That's the way of the forge.",
                 "The mines go a hundred floors deep. Nobody I know has seen the bottom.",
@@ -319,6 +334,8 @@ class Game(val saveFile: File) {
         toasts.removeAll { it.t <= 0 }
         if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) banner = null }
         battle?.update(dt)
+        for (p in particles) p.update(dt)
+        particles.removeAll { it.done }
         if (mode == Mode.FISH) { moving = false; if (tickClock(dt)) updateFishing(dt); return }
         if (mode == Mode.PLAY && levelUps.isNotEmpty()) mode = Mode.SKILLUP
         if (mode != Mode.PLAY) { moving = false; return }
@@ -326,6 +343,7 @@ class Game(val saveFile: File) {
         if (!tickClock(dt)) return
         hurtT = max(0f, hurtT - dt)
         swingT = max(0f, swingT - dt)
+        if (ferry != null) { updateFerry(dt); return }
 
         // movement
         val mag = sqrt(jx * jx + jy * jy)
@@ -340,6 +358,12 @@ class Game(val saveFile: File) {
             dir = if (abs(nx) > abs(ny)) (if (nx > 0) 3 else 2) else (if (ny > 0) 0 else 1)
             tryMove(nx * speed * dt, 0f); tryMove(0f, ny * speed * dt)
             walkT += dt * speed
+            stepAcc += dt * speed
+            if (stepAcc > 0.9f) {
+                stepAcc = 0f
+                val gr = cur.g(floor(px).toInt(), floor(py).toInt())
+                if (gr == Gr.DIRT || gr == Gr.SAND || gr == Gr.CAVE || gr == Gr.TILLED) effect(Effects.STEP, px - nx * 0.2f, py + 0.05f)
+            }
             val last = trail.lastOrNull()
             if (last == null || hypot(last.first - px, last.second - py) > 0.12f) {
                 trail.addLast(px to py); if (trail.size > 40) trail.removeFirst()
@@ -425,6 +449,10 @@ class Game(val saveFile: File) {
         cur = m; px = 4.5f; py = m.h / 2 + 0.5f
         trail.clear(); fx = px; fy = py; dir = 3
         spawnWildsInitial()
+        if (fieldHelper(Field.GLOW) != null && floorN < 100) {
+            val rocks = (0 until m.w * m.h).filter { m.obj[it] == Ob.ROCK && abs(it % m.w - 4) > 3 }
+            if (rocks.isNotEmpty()) m.glint = rocks[rng.nextInt(rocks.size)]
+        }
         if (floorN == 100 && !astralCaught) {
             m.wilds.add(WildMon(Mon(35, 55), 20.5f, m.h / 2 + 0.5f).apply { cooldown = 1f })
             note("Something ancient stirs on this floor...")
@@ -582,6 +610,120 @@ class Game(val saveFile: File) {
         return when (dir) { 0 -> tx to ty + 1; 1 -> tx to ty - 1; 2 -> tx - 1 to ty; else -> tx + 1 to ty }
     }
 
+    // ---------------------------------------------------------------- effects
+
+    /** A stationary animated effect (puff, splash, twinkle, ripple, footstep dust) at tile coords. */
+    fun effect(kind: Int, x: Float, y: Float) {
+        if (particles.size > 140) return
+        val life = when (kind) { Effects.PUFF -> 0.5f; Effects.SPLASH -> 0.5f; Effects.TWINKLE -> 0.45f; Effects.RIPPLE -> 0.4f; else -> 0.36f }
+        particles.add(Particle(kind, x, y, 0f, 0f, if (kind == Effects.PUFF) -0.3f else 0f, 0f, life, 0))
+    }
+
+    /** [n] debris bits flying out of tile (x, y). */
+    fun burst(kind: Int, x: Int, y: Int, n: Int, tint: Int = 0, height: Float = 0.5f) {
+        repeat(n) {
+            if (particles.size > 140) return
+            val a = rng.nextFloat() * 6.283f; val sp = 0.8f + rng.nextFloat() * 1.8f
+            particles.add(Particle(kind, x + 0.5f + (rng.nextFloat() - 0.5f) * 0.4f, y + 0.6f + (rng.nextFloat() - 0.5f) * 0.3f,
+                height * (0.5f + rng.nextFloat()), kotlin.math.cos(a) * sp, kotlin.math.sin(a) * sp * 0.6f, 2.5f + rng.nextFloat() * 3f,
+                0.55f + rng.nextFloat() * 0.35f, rng.nextInt(3), tint))
+        }
+    }
+
+    private fun leafTint() = when (season) { 0 -> if (rng.nextFloat() < 0.3f) Effects.T_PETAL else Effects.T_SPRING; 1 -> Effects.T_SUMMER; 2 -> Effects.T_FALL; else -> Effects.T_WINTER }
+    private fun oreTint(o: Int) = when (o) {
+        Ob.COPPER -> 0xFFE0874A.toInt(); Ob.IRON -> 0xFFC8CCD8.toInt(); Ob.GOLD -> 0xFFF5C842.toInt(); Ob.GEM -> 0xFFC07AF0.toInt()
+        Ob.COALROCK -> 0xFF4A4650.toInt(); Ob.CRAG -> 0xFFC8A47E.toInt(); else -> 0
+    }
+
+    /** Light overlay for the visible tiles (x0..x1, y0..y1), or null when the scene needs none. */
+    fun lighting(x0: Int, y0: Int, x1: Int, y1: Int): Lighting? {
+        val a = cur
+        val l = lead
+        fun leadGlow(list: ArrayList<LightSrc>) {
+            if (l == null) return
+            val col = when (l.sp.type) { EType.FLAME -> Light.WARM; EType.SPARK -> 0xFFF080; EType.STAR -> 0xFFE8A0; EType.FROST -> Light.GLOW; else -> return }
+            list.add(LightSrc(fx, fy - 0.4f, 2.6f, col, 0.8f))
+        }
+        if (a.dark) {
+            val glow = fieldHelper(Field.GLOW) != null
+            val list = ArrayList<LightSrc>()
+            list.add(LightSrc(px, py - 0.3f, if (glow) 7.5f else if (leadJob == Job.LUCK) 5.2f else 4.4f, Light.CANDLE, 1f))
+            leadGlow(list)
+            list.addAll(Light.mineLights(a, x0 - 2, y0 - 2, x1 + 2, y1 + 2))
+            return Lighting(if (glow) 0.82f else Light.MINE_BASE, Light.MINE_COL, list)
+        }
+        if (a.indoor) return null
+        val (base, col) = Light.outdoor(time, raining)
+        if (base < 0.02f) return null
+        val list = ArrayList<LightSrc>()
+        if (base > 0.3f && time >= 1080f) {
+            list.addAll(Light.buildingLights(a))
+            list.add(LightSrc(px, py - 0.4f, 2.4f, Light.CANDLE, 0.65f))
+            leadGlow(list)
+        }
+        return Lighting(base, col, list)
+    }
+
+    // ---------------------------------------------------------------- field abilities
+
+    /** The first healthy party creature whose type grants [f], or null. */
+    fun fieldHelper(f: Field): Mon? = party.firstOrNull { !it.fainted && f in Field.of(it.sp.type) }
+
+    private fun fieldIntroPages(): Array<String> = arrayOf(
+        "Your creatures can help you get around! Any healthy creature in your party lends its type's field ability - just face the obstacle and press Use.",
+        "CUT - Leaf and Gale creatures slice through thorn brambles. SMASH - Stone creatures break cracked crags. CROSS - Tide and Frost creatures carry you over ponds, lakes and rivers (face the water with a tool other than the rod or can).",
+        "GLOW - Flame, Spark and Star creatures light up the mines, and a sparkle marks the rock hiding the ladder down.",
+        "Look for Thornwood Hollow in the south-west of the forest, the Crag Nook in the mountain's north-east corner and the little isle in the mountain lake. Their caches restock every morning, and the brambles and crags grow back overnight.")
+
+    /** Use a field ability on the obstacle at (x, y) (or, for CROSS, the far bank at (x, y)). */
+    fun useField(f: Field, x: Int, y: Int): Boolean {
+        val m = fieldHelper(f)
+        if (!fieldIntro) {
+            fieldIntro = true
+            say(null, *fieldIntroPages())
+            return false
+        }
+        if (m == null) {
+            note(when (f) {
+                Field.CUT -> "A wall of thorny brambles. A Leaf or Gale creature could cut through."
+                Field.SMASH -> "A cracked crag. A Stone creature could smash it."
+                Field.CROSS -> "A Tide or Frost creature could carry you across."
+                Field.GLOW -> "It's too dark. A Flame, Spark or Star creature could light the way."
+            })
+            return false
+        }
+        when (f) {
+            Field.CUT -> { cur.setO(x, y, Ob.NONE); burst(Effects.TWIG, x, y, 6); burst(Effects.LEAF, x, y, 6, if (season == 3) Effects.T_WINTER else leafTint()); effect(Effects.PUFF, x + 0.5f, y + 0.6f) }
+            Field.SMASH -> { cur.setO(x, y, Ob.NONE); burst(Effects.SHARD, x, y, 10, oreTint(Ob.CRAG), 0.8f); effect(Effects.PUFF, x + 0.3f, y + 0.6f); effect(Effects.PUFF, x + 0.7f, y + 0.5f) }
+            Field.CROSS -> {
+                ferry = Ferry(px, py, x + 0.5f, y + 0.5f, m)
+                effect(Effects.SPLASH, px + (x + 0.5f - px) * 0.15f, py + (y + 0.5f - py) * 0.15f)
+            }
+            Field.GLOW -> {}
+        }
+        fieldUses++
+        m.bond += bondGain(1)
+        addXp(Skill.TAME, 2)
+        toast("${m.name} ${f.verb}!", Field.color(f))
+        return true
+    }
+
+    private fun updateFerry(dt: Float) {
+        val f = ferry ?: return
+        f.t += dt
+        val k = (f.t / f.dur).coerceIn(0f, 1f)
+        val e = k * k * (3 - 2 * k)
+        px = f.sx + (f.tx - f.sx) * e; py = f.sy + (f.ty - f.sy) * e
+        walkT += dt * 2f
+        if ((f.t * 8).toInt() != ((f.t - dt) * 8).toInt()) effect(Effects.RIPPLE, px, py + 0.1f)
+        if (k >= 1f) {
+            ferry = null
+            effect(Effects.SPLASH, px - (f.tx - f.sx) * 0.1f, py - (f.ty - f.sy) * 0.1f)
+            trail.clear(); fx = px; fy = py
+        }
+    }
+
     private fun dirVec() = when (dir) { 0 -> 0 to 1; 1 -> 0 to -1; 2 -> -1 to 0; else -> 1 to 0 }
 
     /** The A button. */
@@ -613,12 +755,20 @@ class Game(val saveFile: File) {
             Ob.FOUNTAIN -> { say(null, "Coins glitter at the bottom of the fountain. Someone wished for rain."); return }
             Ob.STOVE -> { openStove(); return }
             Ob.BOARD -> { openBoard(); return }
+            Ob.THORN -> { useField(Field.CUT, fxT, fyT); return }
+            Ob.CRAG -> { useField(Field.SMASH, fxT, fyT); return }
             Ob.SHELF -> { say(null, if (cur.id == "house") "Grandma's old farming almanacs. One page is dog-eared: 'Creatures are family, not tools.'" else "Shelves packed with goods."); return }
         }
         if (cur.id == "farm" && fyT == 6 && fxT in 32..34) { mode = Mode.RANCH; menuSel = -1; return }
         // ripe crop
         val crop = if (cur.inb(fxT, fyT)) cur.crops[cur.idx(fxT, fyT)] else null
         if (crop != null && crop.ripe) { harvest(fxT, fyT); return }
+        // water ahead and not fishing / refilling: a Tide or Frost creature can carry you across
+        val h = held?.id
+        if (Gr.isWater(cur.g(fxT, fyT)) && h != Tool.ROD && h != Tool.CAN && !cur.indoor) {
+            val tgt = Abilities.crossTarget(cur, floor(px).toInt(), floor(py).toInt(), dvx, dvy)
+            if (tgt != null) { useField(Field.CROSS, tgt.first, tgt.second); return }
+        }
         // water tile with can handled by tool
         useHeld()
     }
@@ -685,6 +835,7 @@ class Game(val saveFile: File) {
     private fun pickForage(x: Int, y: Int) {
         val id = cur.aux[cur.idx(x, y)]
         cur.setO(x, y, Ob.NONE)
+        effect(Effects.TWINKLE, x + 0.5f, y + 0.3f)
         var n = if (leadJob == Job.FORAGE) 2 else 1
         if (buff == Buff.LUCK && rng.nextFloat() < 0.5f) n++
         if (rng.nextFloat() < skillLv(Skill.FORAGE) * 0.04f) n++
@@ -701,6 +852,16 @@ class Game(val saveFile: File) {
     }
 
     private fun openChest(x: Int, y: Int) {
+        val cache = Abilities.cacheAt(cur.id, x, y)
+        if (cache != null) {
+            cur.setO(x, y, Ob.NONE)
+            val (loot, g) = Abilities.cacheLoot(cache, season) { rng.nextInt(it) }
+            for ((id, n) in loot) give(id, n)
+            gold += g; toast("+${g}g", 0xFFFFE07A.toInt())
+            effect(Effects.TWINKLE, x + 0.5f, y + 0.4f)
+            note("A hidden cache! It looks like someone restocks it every morning.")
+            return
+        }
         cur.setO(x, y, Ob.NONE)
         val f = cur.mineFloor
         val loot = when {
@@ -716,6 +877,7 @@ class Game(val saveFile: File) {
     private fun harvest(x: Int, y: Int) {
         val i = cur.idx(x, y); val c = cur.crops[i] ?: return
         val d = c.def
+        effect(Effects.TWINKLE, x + 0.5f, y + 0.2f); burst(Effects.LEAF, x, y, 3, Effects.T_GRASS)
         var n = d.yield
         if (leadJob == Job.HARVEST && rng.nextFloat() < 0.35f) n++
         if (rng.nextFloat() < skillLv(Skill.FARM) * 0.03f) n++
@@ -773,17 +935,18 @@ class Game(val saveFile: File) {
                     val x = fx0 + dvx * k; val y = fy0 + dvy * k
                     if (!cur.inb(x, y)) continue
                     val o = cur.o(x, y)
-                    if (o == Ob.WEED) { cur.setO(x, y, Ob.NONE); continue }
+                    if (o == Ob.WEED) { cur.setO(x, y, Ob.NONE); burst(Effects.LEAF, x, y, 4, Effects.T_GRASS); continue }
                     if (cur.id != "farm") { if (k == 0) note("You can only till soil on your farm."); continue }
                     val g = cur.g(x, y)
                     if ((g == Gr.GRASS || g == Gr.DIRT) && (o == Ob.NONE || o == Ob.TALLGRASS)) {
                         cur.setO(x, y, Ob.NONE); cur.setG(x, y, Gr.TILLED); if (raining) cur.watered[cur.idx(x, y)] = true
+                        burst(Effects.CLOD, x, y, 4)
                         addXp(Skill.FARM, 1)
                     }
                 }
             }
             Tool.CAN -> {
-                if (Gr.isWater(cur.g(fx0, fy0))) { water = waterMax; toast("Refilled!", 0xFF9AD6FF.toInt()); return }
+                if (Gr.isWater(cur.g(fx0, fy0))) { water = waterMax; toast("Refilled!", 0xFF9AD6FF.toInt()); effect(Effects.SPLASH, fx0 + 0.5f, fy0 + 0.6f); return }
                 if (water <= 0) { note("The watering can is empty. Refill at a pond or river."); return }
                 val freeWater = leadJob == Job.WATER
                 if (!freeWater && !spend(if (has("tiller")) 1f else 2f)) return
@@ -792,6 +955,7 @@ class Game(val saveFile: File) {
                 var wet = 0
                 for (k in 0..lvl) for (s in (if (wide) -1..1 else 0..0)) {
                     val x = fx0 + dvx * k + (if (dvx == 0) s else 0); val y = fy0 + dvy * k + (if (dvy == 0) s else 0)
+                    if (cur.inb(x, y) && (s == 0 || cur.g(x, y) == Gr.TILLED)) burst(Effects.DROP, x, y, 3, 0, 0.6f)
                     if (cur.inb(x, y) && cur.g(x, y) == Gr.TILLED) {
                         if (!cur.watered[cur.idx(x, y)] && cur.crops[cur.idx(x, y)] != null) wet++
                         cur.watered[cur.idx(x, y)] = true
@@ -809,9 +973,10 @@ class Game(val saveFile: File) {
                         if (o == Ob.BOULDER && lvl < 1) { note("This boulder is too tough. Upgrade your pickaxe."); return }
                         val power = 1 + lvl + (if (leadJob == Job.MINE) 1 else 0) + (if (buff == Buff.MINING) 1 else 0) + (if (has("excavator")) 1 else 0)
                         cur.aux[i] -= power
-                        if (cur.aux[i] <= 0) breakRock(x, y, o)
+                        if (cur.aux[i] <= 0) breakRock(x, y, o) else burst(Effects.SHARD, x, y, 3, oreTint(o))
                     }
-                    Ob.WEED, Ob.STICK -> cur.setO(x, y, Ob.NONE)
+                    Ob.WEED, Ob.STICK -> { cur.setO(x, y, Ob.NONE); burst(if (o == Ob.STICK) Effects.CHIP else Effects.LEAF, x, y, 3, Effects.T_GRASS) }
+                    Ob.CRAG -> note("Your pickaxe just bounces off. A Stone creature could smash this crag.")
                     Ob.SPRINKLER, Ob.QSPRINKLER -> { cur.setO(x, y, Ob.NONE); give(if (o == Ob.SPRINKLER) Items.SPRINKLER else Items.QSPRINKLER, 1) }
                     Ob.NONE -> if (cur.g(x, y) == Gr.TILLED && cur.crops[i] == null) { cur.setG(x, y, Gr.DIRT); cur.watered[i] = false }
                 }
@@ -823,14 +988,17 @@ class Game(val saveFile: File) {
                     Ob.TREE, Ob.PINE -> {
                         if (cur.aux[i] >= 99) { note("This tree is far too big to chop."); return }
                         cur.aux[i] -= 1 + lvl + (if (leadJob == Job.CLEAR) 1 else 0) + (if (has("lumberjack")) 1 else 0)
+                        burst(Effects.LEAF, x, y, 3, leafTint(), 1.6f); burst(Effects.CHIP, x, y, 2)
                         if (cur.aux[i] <= 0) {
+                            burst(Effects.LEAF, x, y, 8, leafTint(), 2.2f); burst(Effects.CHIP, x, y, 6); effect(Effects.PUFF, x + 0.5f, y + 0.6f)
                             cur.setO(x, y, Ob.NONE); give(Items.WOOD, rng.nextInt(5, 9) + (if (has("lumberjack")) 2 else 0))
                             if (rng.nextFloat() < 0.3f) give(Items.FIBER, 2)
                             addXp(Skill.FORAGE, 12)
                         }
                     }
-                    Ob.STICK -> { cur.setO(x, y, Ob.NONE); give(Items.WOOD, rng.nextInt(1, 3)); addXp(Skill.FORAGE, 2) }
-                    Ob.WEED, Ob.BUSH -> if (o == Ob.WEED) cur.setO(x, y, Ob.NONE)
+                    Ob.STICK -> { cur.setO(x, y, Ob.NONE); burst(Effects.CHIP, x, y, 4); give(Items.WOOD, rng.nextInt(1, 3)); addXp(Skill.FORAGE, 2) }
+                    Ob.WEED, Ob.BUSH -> if (o == Ob.WEED) { cur.setO(x, y, Ob.NONE); burst(Effects.LEAF, x, y, 4, Effects.T_GRASS) }
+                    Ob.THORN -> note("The thorns are too tough for an axe. A Leaf or Gale creature could cut them.")
                 }
             }
             Tool.SCYTHE, Tool.SWORD -> {
@@ -839,8 +1007,8 @@ class Game(val saveFile: File) {
                 if (t == Tool.SCYTHE) { if (dvx == 0) { cells.add(fx0 - 1 to fy0); cells.add(fx0 + 1 to fy0) } else { cells.add(fx0 to fy0 - 1); cells.add(fx0 to fy0 + 1) } }
                 for ((x, y) in cells) {
                     val o = cur.o(x, y)
-                    if (o == Ob.WEED) { cur.setO(x, y, Ob.NONE); if (rng.nextFloat() < 0.5f) give(Items.FIBER, 1) }
-                    else if (o == Ob.TALLGRASS && t == Tool.SCYTHE) { cur.setO(x, y, Ob.NONE); if (rng.nextFloat() < 0.4f) give(Items.FIBER, 1) }
+                    if (o == Ob.WEED) { cur.setO(x, y, Ob.NONE); burst(Effects.LEAF, x, y, 4, Effects.T_GRASS); if (rng.nextFloat() < 0.5f) give(Items.FIBER, 1) }
+                    else if (o == Ob.TALLGRASS && t == Tool.SCYTHE) { cur.setO(x, y, Ob.NONE); burst(Effects.LEAF, x, y, 4, leafTint()); if (rng.nextFloat() < 0.4f) give(Items.FIBER, 1) }
                     val c = if (cur.inb(x, y)) cur.crops[cur.idx(x, y)] else null
                     if (c != null && c.ripe && t == Tool.SCYTHE) harvest(x, y)
                 }
@@ -849,6 +1017,7 @@ class Game(val saveFile: File) {
                 for (g in cur.gloops) if (hypot(g.x - hx, g.y - hy) < 1.1f && g.hurt <= 0f) {
                     g.hp -= if (t == Tool.SWORD) 3 else 1
                     g.hurt = 0.35f; g.vx = dvx * 6f; g.vy = dvy * 6f
+                    burst(Effects.GEL, floor(g.x).toInt(), floor(g.y).toInt(), 4, g.color)
                 }
                 val dead = cur.gloops.filter { it.hp <= 0 }
                 for (g in dead) {
@@ -863,6 +1032,8 @@ class Game(val saveFile: File) {
 
     private fun breakRock(x: Int, y: Int, o: Int) {
         cur.setO(x, y, Ob.NONE)
+        burst(Effects.SHARD, x, y, 7, oreTint(o)); effect(Effects.PUFF, x + 0.5f, y + 0.55f)
+        if (cur.mineFloor > 0 && cur.idx(x, y) == cur.glint) { cur.glint = -1; revealLadderAt(x, y) }
         val luck = leadJob == Job.LUCK || leadJob == Job.MINE || buff == Buff.LUCK
         val bonus = (if (rng.nextFloat() < skillLv(Skill.MINE) * 0.04f) 1 else 0) + (if (has("prospector")) 1 else 0)
         addXp(Skill.MINE, when (o) { Ob.ROCK -> 3; Ob.BOULDER -> 10; Ob.COALROCK -> 5; Ob.COPPER -> 6; Ob.IRON -> 8; Ob.GOLD -> 10; Ob.GEM -> 12; else -> 2 })
@@ -1149,6 +1320,7 @@ class Game(val saveFile: File) {
         if (!spend(4f)) return
         swingT = 0.25f; swingTool = Tool.ROD
         fishing = FishingState(loc, t.first, t.second).apply { this.t = biteWait() }
+        effect(Effects.SPLASH, t.first + 0.5f, t.second + 0.6f)
         mode = Mode.FISH
     }
 
@@ -1211,6 +1383,7 @@ class Game(val saveFile: File) {
     private fun landFish(f: FishingState) {
         val fish = f.fish ?: return
         fishing = null; mode = Mode.PLAY
+        effect(Effects.SPLASH, f.bx + 0.5f, f.by + 0.6f); burst(Effects.DROP, f.bx, f.by, 5, 0, 0.8f)
         give(fish.id, 1, true)
         val first = (fishCaught[fish.id] ?: 0) == 0
         fishCaught[fish.id] = (fishCaught[fish.id] ?: 0) + 1
@@ -1293,6 +1466,7 @@ class Game(val saveFile: File) {
         if (!skillsTip) { skillsTip = true; lines.add("NEW: Skills! Farming, Foraging, Mining, Fishing and Taming now level up from 1 to 10 as you work. Each level gives a small bonus, and at levels 5 and 10 you pick a perk. See the Skills tab in the menu.") }
         trialsToday.clear()
         if (!trialTip && started) { trialTip = true; lines.add("NEW: Ranger Trials! Rangers Juniper (forest), Marlo (beach) and Flint (mountain) will battle your whole party for a badge. Win all three, then challenge Ranger Wren. Each badge gives a perk - see the Badges tab.") }
+        if (!fieldTip && started) { fieldTip = true; lines.add("NEW: Field abilities! Creatures in your party can now cut thorns (Leaf/Gale), smash crags (Stone), carry you across water (Tide/Frost) and light the mines (Flame/Spark/Star). Hidden caches wait in Thornwood Hollow (forest), the Crag Nook and the mountain lake isle.") }
         if (!cookTip) { cookTip = true; lines.add("NEW: Grandma's old stove in the farmhouse kitchen works again! Face it and press Cook to turn crops, forage and fish into dishes that give energy and a buff.") }
         // weeds creep back
         repeat(4) {
@@ -1436,6 +1610,7 @@ class Game(val saveFile: File) {
             o.put("lvlQ", JSONArray(levelUps.toList())); o.put("skillTip", skillsTip)
             o.put("quests", JSONArray().apply { quests.forEach { put(it.toJson()) } }); o.put("boardTip", boardTip); o.put("boardIntro", boardIntro); o.put("qDone", questsDone)
             o.put("badges", JSONArray(badges.toList())); o.put("trialTip", trialTip); o.put("trialIntro", trialIntro)
+            o.put("fieldTip", fieldTip); o.put("fieldIntro", fieldIntro); o.put("fieldUses", fieldUses)
             val f = areas["farm"]!!
             o.put("fg", intsToStr(f.ground)); o.put("fo", intsToStr(f.obj)); o.put("fa", intsToStr(f.aux))
             o.put("fw", f.watered.joinToString("") { if (it) "1" else "0" })
@@ -1478,6 +1653,7 @@ class Game(val saveFile: File) {
             boardTip = o.optBoolean("boardTip", false); boardIntro = o.optBoolean("boardIntro", false); questsDone = o.optInt("qDone", 0)
             o.optJSONArray("badges")?.let { a -> for (i in 0 until a.length()) a.optString(i).takeIf { b -> Trials.list.any { it.badge == b } }?.let { badges.add(it) } }
             trialTip = o.optBoolean("trialTip", false); trialIntro = o.optBoolean("trialIntro", false)
+            fieldTip = o.optBoolean("fieldTip", false); fieldIntro = o.optBoolean("fieldIntro", false); fieldUses = o.optInt("fieldUses", 0)
             val f = areas["farm"]!!
             strToInts(o.getString("fg"), f.ground); strToInts(o.getString("fo"), f.obj); strToInts(o.getString("fa"), f.aux)
             val fw = o.getString("fw"); for (i in f.watered.indices) f.watered[i] = fw.getOrNull(i) == '1'

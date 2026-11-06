@@ -87,6 +87,43 @@ class Art {
     val shelf = Interior.shelf()
     val chest = Decor.chest().bmp()
     val stove: Bitmap = Hud.stove.bmp()
+    // field-ability obstacles and effects (Effects.kt)
+    val thorn = Array(4) { s -> Array(2) { v -> Effects.thorn(s, v == 1).bmp() } }
+    val crag = Effects.crag().bmp()
+    val puff = Effects.puff().map { it.bmp() }
+    val puffCave = Effects.puff(true).map { it.bmp() }
+    val splash = Effects.splash().map { it.bmp() }
+    val twinkle = Effects.twinkle().map { it.bmp() }
+    val ripple = Effects.ripple().map { it.bmp() }
+    val rainDrop = Effects.rain().bmp()
+    val snowFlake = Effects.snow().map { it.bmp() }
+    val firefly = Effects.firefly().bmp()
+    private val litCache = HashMap<Bitmap, Bitmap>()
+    private val litGlass = mapOf(c(0xFF34507A) to c(0xFF8A4A24), c(0xFF5C8EBC) to c(0xFFE0963A), c(0xFF9CCCE8) to c(0xFFFFCE70), c(0xFFE8F8FF) to c(0xFFFFF2C4))
+    /** A building at night: its window and door glass glows lamp-amber instead of reflecting the sky. */
+    fun lit(b: Bitmap): Bitmap = litCache.getOrPut(b) {
+        val w = b.width; val h = b.height; val p = IntArray(w * h)
+        b.getPixels(p, 0, w, 0, 0, w, h)
+        for (i in p.indices) litGlass[p[i]]?.let { p[i] = it }
+        Bitmap.createBitmap(p, w, h, Bitmap.Config.ARGB_8888)
+    }
+    val step = Effects.step().map { it.bmp() }
+    val stepCave = Effects.step(true).map { it.bmp() }
+    /** The sprite for a particle right now ([cave] picks the darker dust); null when nothing should draw. */
+    fun particleFrame(p: Particle, cave: Boolean): Bitmap? {
+        fun pick(l: List<Bitmap>) = l[(p.progress * l.size).toInt().coerceIn(0, l.size - 1)]
+        return when (p.kind) {
+            Effects.PUFF -> pick(if (cave) puffCave else puff)
+            Effects.STEP -> pick(if (cave) stepCave else step)
+            Effects.SPLASH -> pick(splash)
+            Effects.TWINKLE -> pick(twinkle)
+            Effects.RIPPLE -> pick(ripple)
+            else -> { val l = bits(p.kind, p.tint); if (p.t > p.life - 0.12f && ((p.t * 30).toInt() % 2 == 0)) null else l[p.variant % l.size] }
+        }
+    }
+    private val bitCache = HashMap<Long, List<Bitmap>>()
+    /** Debris sprites for a particle kind + tint (cached). */
+    fun bits(kind: Int, tint: Int): List<Bitmap> = bitCache.getOrPut((kind.toLong() shl 32) or (tint.toLong() and 0xFFFFFFFFL)) { Effects.bits(kind, tint).map { it.bmp() } }
 
     val buildings = HashMap<Int, Bitmap>()
 

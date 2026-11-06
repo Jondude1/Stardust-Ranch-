@@ -39,7 +39,7 @@ Pick the highest item not yet done (mark done items with [x] and the release tag
 - [x] Skills: Farming, Foraging, Mining, Fishing, Taming levels 1-10 with XP, level-up screen and a perk choice at 5 and 10 (v1.0.20)
 - [x] Bulletin board quests in town: daily villager requests with gold, friendship and item rewards (v1.0.22)
 - [x] Ranger trials: 4 tamer challenges (one per season area) with multi-creature trainer battles and badges that unlock perks (v1.0.24)
-- [ ] Overworld creature abilities: creatures of a type let you cross water, smash boulders, cut thorn hedges, light the mines; gate new spots behind them
+- [x] Overworld creature abilities: creatures of a type let you cross water, smash boulders, cut thorn hedges, light the mines; gate new spots behind them (v1.0.NEXT)
 - [ ] Farm buildings via a carpenter: coop-style creature barn upgrade, greenhouse (all-season crops), silo, shed; fruit trees
 - [ ] Artisan machines: preserves jar, keg, cheese-style press, furnace for ore bars; crafted and placed on the farm
 - [ ] Mine bosses every 25 floors, more enemy types with attack patterns, weapon tiers sold by Gus

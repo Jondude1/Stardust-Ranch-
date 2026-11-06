@@ -217,17 +217,20 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             if (b != null) bmp(c, b, sx, sy, T.toFloat(), T.toFloat())
             else { fill.color = Color.BLACK; c.drawRect(sx, sy, sx + T, sy + T, fill) }
         }
+        val litWindows = !a.indoor && !a.dark && (g.time >= 1110f || (g.raining && g.time >= 1020f))
         // rows painter
         val rowEnd = min(a.h - 1, y1 + 6)
         for (y in y0..rowEnd) {
             if (y <= y1 + 5) for (x in x0..x1) drawCell(c, a, x, y)
             for ((bi, b) in a.buildings.withIndex()) if (b.y + b.th - 1 == y) {
-                val bm = if (b.type == Bld.COTTAGE) art.cottage(bi) else art.buildings[b.type] ?: continue
+                val bm0 = if (b.type == Bld.COTTAGE) art.cottage(bi) else art.buildings[b.type] ?: continue
+                val bm = if (litWindows) art.lit(bm0) else bm0
                 val bw = bm.width * sc.toFloat(); val bh = bm.height * sc.toFloat()
                 bmp(c, bm, b.x * T - camX + (b.tw * T - bw) / 2, (b.y + b.th) * T - camY - bh)
             }
             drawEntitiesInRow(c, a, y)
         }
+        drawParticles(c, a)
         // toasts
         for (t in g.toasts) {
             txt.textSize = 13 * u; txt.textAlign = Paint.Align.CENTER
@@ -235,30 +238,103 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             txt.color = 0xC0000000.toInt(); c.drawText(t.text, x + 1.5f * u, yy + 1.5f * u, txt)
             txt.color = t.color; c.drawText(t.text, x, yy, txt)
         }
-        // lighting
-        if (a.dark) {
-            val cx = g.px * T - camX; val cy = g.py * T - camY
-            val r = T * (if (g.leadJob == Job.LUCK || g.lead?.sp?.type == EType.FLAME) 5.5f else 4.2f)
-            fill.shader = RadialGradient(cx, cy - T * 0.3f, r, intArrayOf(0x00000000, 0x55000000, 0xF0000000.toInt()), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
-            c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), fill); fill.shader = null
-        } else if (!a.indoor) {
-            val t = ((g.time - 1080f) / 240f).coerceIn(0f, 1f) * 0.6f + (if (g.raining) 0.12f else 0f)
-            if (t > 0.01f) { fill.color = Color.argb((t * 255).toInt(), 16, 22, 60); c.drawRect(0f, 0f, W.toFloat(), H.toFloat(), fill) }
-            if (g.raining || g.season == 3) drawWeather(c)
+        // lighting: pixel lightmap (Effects.kt Light), then weather and glowing ambient life on top
+        g.lighting(x0, y0, x1, y1)?.let { drawLight(c, it) }
+        if (!a.indoor && !a.dark) drawWeather(c)
+        if (a.dark) drawMotes(c)
+    }
+
+    private var lightBmp: Bitmap? = null
+    private var lightBuf = IntArray(0)
+
+    /** Renders the world-aligned lightmap (4 cells per tile) and stretches it over the view without filtering. */
+    private fun drawLight(c: Canvas, lt: Lighting) {
+        val cs = T / Light.CELLS.toFloat()
+        val cx0 = floor(camX / cs).toInt() - 1; val cy0 = floor(camY / cs).toInt() - 1
+        val cw = (W / cs).toInt() + 3; val ch = (H / cs).toInt() + 3
+        if (lightBuf.size != cw * ch) lightBuf = IntArray(cw * ch)
+        Light.render(lightBuf, cw, ch, cx0, cy0, lt.base, lt.shade, lt.srcs)
+        var b = lightBmp
+        if (b == null || b.width != cw || b.height != ch) { b = Bitmap.createBitmap(cw, ch, Bitmap.Config.ARGB_8888); lightBmp = b }
+        b!!.setPixels(lightBuf, 0, cw, 0, 0, cw, ch)
+        dst.set(cx0 * cs - camX, cy0 * cs - camY, (cx0 + cw) * cs - camX, (cy0 + ch) * cs - camY)
+        c.drawBitmap(b, null, dst, px)
+    }
+
+    /** Debris, dust, splashes and twinkles (Game.particles), drawn at pixel scale with a tiny ground shadow. */
+    private fun drawParticles(c: Canvas, a: Area) {
+        for (p in g.particles) {
+            val b = art.particleFrame(p, a.dark) ?: continue
+            val sx = p.x * T - camX; val gy = p.y * T - camY; val sy = (p.y - p.z) * T - camY
+            if (p.z > 0.05f && p.kind < Effects.PUFF) { fill.color = 0x40000000; c.drawRect(sx - sc, gy - sc * 0.5f, sx + sc, gy + sc * 0.5f, fill) }
+            val oy = if (Effects.grounded(p.kind)) sy - b.height * sc else sy - b.height * sc / 2f
+            bmp(c, b, sx - b.width * sc / 2f, oy)
         }
     }
 
+    private fun hash(i: Int, k: Int): Float { var h = i * 374761393 + k * 668265263; h = (h xor (h ushr 13)) * 1274126177; return ((h xor (h ushr 16)) and 0xFFFF) / 65535f }
+
+    /** Rain streaks with ripples where they land, drifting snowflakes, falling leaves/petals, fireflies at night. */
     private fun drawWeather(c: Canvas) {
-        val snow = g.season == 3
-        val n = if (snow) 70 else 110
-        stroke.strokeWidth = 1.5f * u
-        for (i in 0 until n) {
-            val seed = i * 9973
-            val sx = ((seed % W) + g.frame * (if (snow) 20f else -160f) * u + (seed % 37) * 10) % W
-            val sy = ((seed * 7 % H) + g.frame * (if (snow) 40f else 600f) * u) % H
-            val x = if (sx < 0) sx + W else sx
-            if (snow) { fill.color = 0xD0FFFFFF.toInt(); c.drawCircle(x + sin(g.frame + i) * 6 * u, sy, 2f * u, fill) }
-            else { stroke.color = 0x90BFD8FF.toInt(); c.drawLine(x, sy, x - 4 * u, sy + 14 * u, stroke) }
+        val Wf = W.toFloat(); val Hf = H.toFloat()
+        if (g.raining) {
+            val n = (W * H / (sc * sc * 260)).coerceAtMost(260)
+            for (i in 0 until n) {
+                val sp = 0.55f + hash(i, 1) * 0.25f
+                val t = (g.frame * 2.2f / sp + hash(i, 2)) % 1f
+                val x = (hash(i, 3) * (Wf + 60 * u) - t * 60 * u + Wf) % Wf
+                val y = t * (Hf + 20 * u) - 20 * u
+                bmp(c, art.rainDrop, x, y)
+            }
+            // ripples: each slot lands a drop somewhere on screen every 0.4s
+            for (i in 0 until (W * H / (sc * sc * 1400)).coerceAtMost(60)) {
+                val cyc = g.frame / 0.4f + hash(i, 4); val k = cyc.toInt(); val f = ((cyc - k) * 3).toInt().coerceIn(0, 2)
+                val x = hash(i * 31 + k, 5) * Wf; val y = hash(i * 17 + k, 6) * Hf
+                val tx = floor((x + camX) / T).toInt(); val ty = floor((y + camY) / T).toInt()
+                val gr = g.cur.g(tx, ty)
+                if (Gr.solid(gr) && !Gr.isWater(gr)) continue
+                bmp(c, art.ripple[f], x, y)
+            }
+        } else if (g.season == 3) {
+            val n = (W * H / (sc * sc * 700)).coerceAtMost(120)
+            for (i in 0 until n) {
+                val v = if (hash(i, 7) < 0.55f) 0 else if (hash(i, 7) < 0.85f) 1 else 2
+                val sp = 0.35f + v * 0.12f
+                val t = (g.frame * sp * 0.12f + hash(i, 8)) % 1f
+                val x = (hash(i, 9) * Wf + sin(g.frame * 0.9f + i) * 10 * u + t * 40 * u) % Wf
+                bmp(c, art.snowFlake[v], x, t * (Hf + 20 * u) - 10 * u)
+            }
+        } else if (g.season == 2 || g.season == 0) {
+            // drifting fall leaves / spring petals
+            val tint = if (g.season == 2) Effects.T_FALL else Effects.T_PETAL
+            val leaves = art.bits(Effects.LEAF, tint)
+            for (i in 0 until 10) {
+                val t = (g.frame * (0.05f + hash(i, 10) * 0.04f) + hash(i, 11)) % 1f
+                val x = (hash(i, 12) * Wf + t * Wf * 0.5f + sin(g.frame * 1.7f + i) * 14 * u) % Wf
+                bmp(c, leaves[((g.frame * 3 + i).toInt()) % leaves.size], x, t * (Hf + 30 * u) - 15 * u)
+            }
+        }
+        // fireflies on summer and late-spring nights
+        if ((g.season == 1 || g.season == 0) && g.time >= 1170f && !g.raining) {
+            val n = if (g.season == 1) 16 else 7
+            for (i in 0 until n) {
+                val wx = hash(i, 13) * Wf + sin(g.frame * 0.5f + i * 2.1f) * 30 * u
+                val wy = hash(i, 14) * Hf + sin(g.frame * 0.37f + i * 1.3f) * 22 * u
+                if (sin(g.frame * 2.3f + i * 4.7f) > 0.6f) continue  // blink
+                bmp(c, art.firefly, wx - 2 * sc, wy - 2 * sc)
+            }
+        }
+    }
+
+    /** Dust motes drifting through the lantern light in the mines. */
+    private fun drawMotes(c: Canvas) {
+        val cx = g.px * T - camX; val cy = g.py * T - camY - T * 0.6f
+        for (i in 0 until 12) {
+            val ang = hash(i, 20) * 6.283f + g.frame * (0.08f + hash(i, 21) * 0.1f)
+            val r = (0.6f + hash(i, 22) * 2.4f) * T
+            val x = cx + kotlin.math.cos(ang) * r; val y = cy + sin(ang) * r * 0.6f - ((g.frame * 6 + i * 13) % 30) * sc * 0.3f
+            fill.color = if (i % 3 == 0) 0x90FFE0A0.toInt() else 0x60FFD890
+            c.drawRect(floor(x / sc) * sc, floor(y / sc) * sc, floor(x / sc) * sc + sc, floor(y / sc) * sc + sc, fill)
         }
     }
 
@@ -284,6 +360,7 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             Ob.BED -> { if (a.o(x, y - 1) == Ob.BED) return; art.bed }
             Ob.BOARD -> { if (a.o(x - 1, y) == Ob.BOARD) return; art.board }
             Ob.FOUNTAIN -> { if (a.o(x - 1, y) == Ob.FOUNTAIN || a.o(x, y + 1) == Ob.FOUNTAIN) return; art.fountain[((g.frame * 4).toInt()) % 3] }
+            Ob.THORN -> art.thorn[s][(x + y) % 2]; Ob.CRAG -> art.crag
             else -> return
         }
         val bw = b.width * sc.toFloat(); val bh = b.height * sc.toFloat()
@@ -297,6 +374,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             }
             else -> bmp(c, b, sx + (T - bw) / 2, sy + T - bh)
         }
+        // a Glow creature marks the rock hiding the ladder with a slow twinkle
+        if (i == a.glint) bmp(c, art.twinkle[((g.frame * 5).toInt() % 6).coerceAtMost(3)], sx + T / 2f - 4.5f * sc, sy - 3f * sc + sin(g.frame * 3) * sc)
     }
 
     private fun drawShadow(c: Canvas, x: Float, y: Float, w: Float) {
@@ -345,13 +424,23 @@ class Ui(val g: Game, val art: Art, val host: Host) {
             bmp(c, fr, sx - 8 * sc, sy - 14 * sc)
         }
         val lead = g.party.firstOrNull()
-        if (lead != null && !lead.fainted && floor(g.fy).toInt() == row && g.cur.id != "store") drawMonWorld(c, lead, g.fx, g.fy, g.fflip, g.frame + g.walkT * 0.3f, 0.7f)
+        if (lead != null && !lead.fainted && g.ferry?.mon !== lead && floor(g.fy).toInt() == row && g.cur.id != "store") drawMonWorld(c, lead, g.fx, g.fy, g.fflip, g.frame + g.walkT * 0.3f, 0.7f)
         if (floor(g.py).toInt() == row) drawPlayer(c)
     }
 
     private fun drawPlayer(c: Canvas) {
         val sx = g.px * T - camX; val sy = g.py * T - camY
         val fr = if (g.moving) 1 + (g.walkT * 4.4f).toInt() % 4 else 0
+        val fr0 = g.ferry
+        if (fr0 != null) {
+            // riding a creature across the water: it swims under you, you sit a little higher
+            val bob = sin(g.frame * 8f) * sc
+            val f = art.mon(fr0.mon.speciesId)
+            val w = 32 * sc * 0.95f
+            bmp(c, f[((g.frame * 4).toInt() % 2) + if (fr0.tx < fr0.sx) 2 else 0], sx - w / 2, sy - w * 0.62f + bob, w, w)
+            bmp(c, People.player[g.dir][0], sx - 8 * sc, sy - 29 * sc - 9 * sc + bob)
+            return
+        }
         drawShadow(c, sx, sy, T * 0.6f)
         if (g.hurtT > 0 && ((g.hurtT * 16).toInt() % 2 == 0)) return
         // tool swing behind when facing up
@@ -857,6 +946,8 @@ class Ui(val g: Game, val art: Art, val host: Host) {
         text(c, "Moves: " + m.moves().joinToString(", ") { it.name }, dx, y, 11f); y += 18 * u
         text(c, "Farm job: ${m.sp.job.label} (power ${m.jobPower})", dx, y, 12f, 0xFF3E7A2A.toInt()); y += 16 * u
         for (line in wrap(m.sp.job.desc, a.right - dx, 11f)) { text(c, line, dx, y, 11f); y += 15 * u }
+        val fields = Field.of(m.sp.type)
+        if (fields.isNotEmpty()) { y += 3 * u; for (line in wrap("Field ability: " + fields.joinToString { it.label } + ". " + fields.first().desc, a.right - dx, 11f)) { text(c, line, dx, y, 11f, 0xFF3F6E9E.toInt()); y += 15 * u } }
         text(c, "Tap two creatures to reorder. The first one follows you.", a.left, a.bottom - 4 * u, 10f, 0xFF6E5A48.toInt())
     }
 

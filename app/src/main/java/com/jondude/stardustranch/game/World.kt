@@ -22,6 +22,8 @@ object Ob {
     const val GOODS = 34 // ranch goods lying in the pen; aux = item id
     const val STOVE = 35 // farmhouse kitchen stove (cooking)
     const val BOARD = 36 // town bulletin board (2 tiles wide; requests)
+    const val THORN = 37 // thorn bramble: cut by a Leaf/Gale creature (Abilities)
+    const val CRAG = 38  // cracked crag: smashed by a Stone creature (Abilities)
     fun walkable(o: Int) = o == NONE || o == TALLGRASS || o == FORAGE || o == FLOWER || o == LADDER || o == LADDERUP || o == GOODS
 }
 
@@ -62,6 +64,8 @@ class Area(val id: String, val w: Int, val h: Int) {
     var dark = false
     var mineFloor = 0
     var beach = false
+    /** Mines: tile index of the rock a Glow creature has marked as hiding the ladder down (-1 = none). */
+    var glint = -1
     var forageSpots = 0
     val wilds = ArrayList<WildMon>()
     val gloops = ArrayList<Gloop>()
@@ -254,6 +258,7 @@ object World {
         a.nightSpawns = intArrayOf(17, 17, 28, 21, 15)
         a.minLv = 2; a.maxLv = 8; a.maxWild = 9; a.forageSpots = 12
         rangerSpot(a)
+        Abilities.carveForest(a)
         return a
     }
 
@@ -309,6 +314,7 @@ object World {
         a.nightSpawns = intArrayOf(17, 9, 11)
         a.minLv = 5; a.maxLv = 12; a.maxWild = 6; a.forageSpots = 4
         rangerSpot(a)
+        Abilities.carveMountain(a)
         return a
     }
 

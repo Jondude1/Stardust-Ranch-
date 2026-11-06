@@ -49,16 +49,19 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
                 Ob.BED -> if (a.o(x, y - 1) == Ob.BED) null else art.bed
                 Ob.FOUNTAIN -> if (a.o(x - 1, y) == Ob.FOUNTAIN || a.o(x, y + 1) == Ob.FOUNTAIN) null else art.fountain[0]
                 Ob.BOARD -> if (a.o(x - 1, y) == Ob.BOARD) null else art.board
+                Ob.THORN -> art.thorn[season][(x + y) % 2]; Ob.CRAG -> art.crag
                 else -> null
             }
             if (b != null) {
                 val ox = (x - x0) * T + (T - b.width) / 2
                 val oy = when (o) { Ob.BED -> (y - y0) * T; else -> (y - y0 + 1) * T - b.height }
                 sh.draw(b, (if (o == Ob.BED || o == Ob.FOUNTAIN || o == Ob.BOARD) (x - x0) * T else ox) * s, oy * s, s)
+                if (i == a.glint) { val tw = art.twinkle[2]; sh.draw(tw, ((x - x0) * T + 4) * s, ((y - y0) * T - 4) * s, s) }
             }
         }
         for (bd in a.buildings) if (bd.y + bd.th - 1 == y) {
-            val bm = if (bd.type == Bld.COTTAGE) art.cottage(bd.x % 3) else art.buildings[bd.type]!!
+            val bm0 = if (bd.type == Bld.COTTAGE) art.cottage(bd.x % 3) else art.buildings[bd.type]!!
+            val bm = if (g != null && g.time >= 1110f && !a.indoor) art.lit(bm0) else bm0
             sh.draw(bm, ((bd.x - x0) * T + (bd.tw * T - bm.width) / 2) * s, ((bd.y + bd.th - y0) * T - bm.height) * s, s)
         }
         if (g != null) {
@@ -68,7 +71,11 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
                 sh.draw(People.npc[n.key]!![0][0], ((n.x - x0) * T - 8).toInt() * s, ((n.y - y0) * T - 29).toInt() * s, s)
                 Trials.byKey[n.key]?.let { d -> if (!g.hasBadge(d.badge)) sh.draw(Trials.badgePx(d.badge).bmp(), ((n.x - x0) * T - 4).toInt() * s, ((n.y - y0) * T - 31 - 8).toInt() * s, s / 2) }
             }
-            if (g.cur === a && g.py.toInt() == y) {
+            if (g.cur === a && g.py.toInt() == y && g.ferry != null) {
+                val f = g.ferry!!
+                sh.draw(art.mon(f.mon.speciesId)[if (f.tx < f.sx) 2 else 0], ((g.px - x0) * T - 15).toInt() * s, ((g.py - y0) * T - 20).toInt() * s, s)
+                sh.draw(People.player[g.dir][0], ((g.px - x0) * T - 8).toInt() * s, ((g.py - y0) * T - 38).toInt() * s, s)
+            } else if (g.cur === a && g.py.toInt() == y) {
                 sh.draw(People.player[0][0], ((g.px - x0) * T - 8).toInt() * s, ((g.py - y0) * T - 29).toInt() * s, s)
                 g.party.firstOrNull()?.let { sh.draw(art.mon(it.speciesId)[0], ((g.px - 1.2f - x0) * T - 16).toInt() * s, ((g.py - y0) * T - 30).toInt() * s, s) }
             }
@@ -76,6 +83,36 @@ fun renderArea(art: Art, a: Area, season: Int, x0: Int, y0: Int, tw: Int, th: In
     }
     sh.save(out)
     return sh
+}
+
+/** Particles of [g] drawn the same way Ui.drawParticles does. */
+fun Sheet.particles(art: Art, g: Game, a: Area, x0: Int, y0: Int, s: Int) {
+    for (p in g.particles) {
+        val b = art.particleFrame(p, a.dark) ?: continue
+        val cx = ((p.x - x0) * 16).toInt(); val cy = ((p.y - p.z - y0) * 16).toInt()
+        val oy = if (Effects.grounded(p.kind)) cy - b.height else cy - b.height / 2
+        draw(b, (cx - b.width / 2) * s, oy * s, s)
+    }
+}
+
+/** The light overlay (Ui.drawLight): returns the mean darkness. */
+fun Sheet.lightmap(lt: Lighting?, x0: Int, y0: Int, tw: Int, th: Int, s: Int): Float {
+    if (lt == null) return 0f
+    val cw = tw * Light.CELLS; val ch = th * Light.CELLS; val arr = IntArray(cw * ch)
+    Light.render(arr, cw, ch, x0 * Light.CELLS, y0 * Light.CELLS, lt.base, lt.shade, lt.srcs)
+    val k = 16 / Light.CELLS * s
+    for (j in 0 until ch) for (i in 0 until cw) { val c = arr[j * cw + i]; if (c != 0) rect(i * k, j * k, i * k + k, j * k + k, c) }
+    return Light.meanAlpha(arr)
+}
+
+/** Stateless rain streaks + ripples over a sheet (mirrors Ui.drawWeather at one frame). */
+fun Sheet.rain(art: Art, s: Int, frame: Float) {
+    val n = w * h / (s * s * 900)
+    for (i in 0 until n) {
+        val sx = ((i * 7919 + (frame * 90).toInt()) % (w / s)); val sy = ((i * 104729 / 7 + (frame * 400).toInt()) % (h / s))
+        draw(art.rainDrop, sx * s, sy * s, s)
+        if (i % 3 == 0) draw(art.ripple[i % 3], ((i * 3571) % (w / s)) * s, ((i * 6007) % (h / s)) * s, s)
+    }
 }
 
 // ---- HUD mock helpers (mirror Ui.nine / Ui.bar so the sheet matches the game) ----
@@ -792,5 +829,139 @@ fun main(args: Array<String>) {
     renderArea(art, bea, 1, 8, 4, 14, 9, 4, "$out/ranger_beach.png", g)
     val mtn = g.areas["mountain"]!!; g.cur = mtn; g.px = 24.5f; g.py = 11.5f
     renderArea(art, mtn, 2, 16, 1, 14, 12, 4, "$out/ranger_mountain.png", g)
+    renderAbilities(art, g, out)
     println("DONE")
+}
+
+/** Field abilities sim + effects/lighting renders. */
+fun renderAbilities(art: Art, g: Game, out: String) {
+    val keepParty = ArrayList(g.party)
+    fun closeDlg() { val d = g.dialog ?: return; g.dialog = null; g.mode = Mode.PLAY; d.onClose?.invoke() }
+    fun stepFor(sec: Float) { var t = 0f; while (t < sec) { drainLevelUps(g); g.update(0.05f, 0f, 0f); t += 0.05f } }
+    fun act() { drainLevelUps(g); if (g.mode == Mode.SKILLUP) g.mode = Mode.PLAY; g.action() }
+    g.time = 600f; g.raining = false
+    // ---- placement: every gate exists and fences its spot in
+    val fo = g.areas["forest"]!!; val mt = g.areas["mountain"]!!
+    val h = Abilities.HOLLOW
+    val thorns = (0 until fo.w * fo.h).count { fo.obj[it] == Ob.THORN }
+    fun reach(a: Area, sx: Int, sy: Int): BooleanArray {
+        val seen = BooleanArray(a.w * a.h); val q = ArrayDeque<Int>(); q.add(a.idx(sx, sy)); seen[a.idx(sx, sy)] = true
+        while (q.isNotEmpty()) { val i = q.removeFirst(); val x = i % a.w; val y = i / a.w
+            for ((dx, dy) in listOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)) { val nx = x + dx; val ny = y + dy
+                if (a.inb(nx, ny) && !seen[a.idx(nx, ny)] && !a.solid(nx, ny)) { seen[a.idx(nx, ny)] = true; q.add(a.idx(nx, ny)) } } }
+        return seen
+    }
+    val fr = reach(fo, 23, 2)
+    val hollowSealed = !fr[fo.idx(h[0] + 2, h[1] + 2)]
+    val mr = reach(mt, 20, 27)
+    val nookSealed = !mr[mt.idx(Abilities.NOOK[0] + 2, Abilities.NOOK[1] + 1)]
+    val isleSealed = !mr[mt.idx(Abilities.ISLE[0], Abilities.ISLE[1] + 1)]
+    val gateReachable = fr[fo.idx(h[0] + h[2], h[1] + 4)] && mr[mt.idx(Abilities.NOOK_CRAG.first, Abilities.NOOK_CRAG.second + 1)]
+    println("abilities: thorns=$thorns sealed=[$hollowSealed, $nookSealed, $isleSealed] gatesReachable=$gateReachable crag=${mt.o(Abilities.NOOK_CRAG.first, Abilities.NOOK_CRAG.second) == Ob.CRAG}")
+    // ---- intro, then a party with no helpers is refused
+    g.fieldIntro = false
+    g.party.clear(); g.party.add(Mon(15, 10, "Bun"))   // Wild type: no abilities
+    g.warp("forest", h[0] + h[2] + 0.5f, h[1] + 4.5f, 2); closeDlg(); g.cur.wilds.clear(); g.mode = Mode.PLAY
+    act(); val intro = g.mode == Mode.DIALOG && g.fieldIntro && (g.dialog?.pages?.size ?: 0) == 4; closeDlg()
+    act(); val refused = g.cur.o(h[0] + h[2] - 1, h[1] + 4) == Ob.THORN && g.banner?.contains("Leaf or Gale") == true
+    // ---- CUT with a Leaf creature, walk in, open the cache
+    g.party.add(0, Mon(0, 12, "Sprig"))
+    val bond0 = g.party[0].bond
+    act(); val cut = g.cur.o(h[0] + h[2] - 1, h[1] + 4) == Ob.NONE && g.party[0].bond > bond0 && g.particles.isNotEmpty()
+    val parts = g.particles.size
+    // freeze a burst mid-air for the effects render
+    g.burst(Effects.LEAF, h[0] + h[2] - 1, h[1] + 4, 4, Effects.T_SUMMER); g.burst(Effects.TWIG, h[0] + h[2] - 1, h[1] + 4, 3)
+    run { var t = 0f; while (t < 0.12f) { for (p in g.particles) p.update(0.04f); t += 0.04f } }
+    g.px = h[0] + h[2] + 0.5f; g.py = h[1] + 4.5f
+    renderArea(art, fo, 1, h[0] - 1, h[1] - 3, h[2] + 5, h[3] + 4, 4, "$out/hollow.png", g).also { it.particles(art, g, fo, h[0] - 1, h[1] - 3, 4); it.save("$out/hollow.png") }
+    stepFor(1.2f)
+    val (cx, cy) = Abilities.caches["forest"]!!
+    g.px = cx + 0.5f; g.py = cy + 1.5f; g.dir = 1
+    val gold0 = g.gold; val orbs0 = g.inv.count(Items.SUPER_ORB)
+    act(); val cache = g.gold - gold0 == 80 && g.inv.count(Items.SUPER_ORB) == orbs0 + 1 && fo.o(cx, cy) == Ob.NONE
+    // ---- SMASH: pickaxe bounces, Stone creature smashes
+    g.warp("mountain", Abilities.NOOK_CRAG.first + 0.5f, Abilities.NOOK_CRAG.second + 1.5f, 1); closeDlg(); g.cur.wilds.clear(); g.mode = Mode.PLAY
+    g.sel = g.inv.slots.indexOfFirst { it?.id == Tool.PICK }; g.useHeld()
+    val bounced = g.cur.o(Abilities.NOOK_CRAG.first, Abilities.NOOK_CRAG.second) == Ob.CRAG
+    act(); val noStone = g.cur.o(Abilities.NOOK_CRAG.first, Abilities.NOOK_CRAG.second) == Ob.CRAG
+    g.party.add(Mon(9, 14, "Pebs"))
+    act(); val smashed = g.cur.o(Abilities.NOOK_CRAG.first, Abilities.NOOK_CRAG.second) == Ob.NONE
+    run { var t = 0f; while (t < 0.1f) { for (p in g.particles) p.update(0.05f); t += 0.05f } }
+    renderArea(art, mt, 0, 28, 2, 11, 10, 4, "$out/nook.png", g).also { it.particles(art, g, mt, 28, 2, 4); it.save("$out/nook.png") }
+    stepFor(1f)
+    // ---- CROSS: no Tide/Frost refuses; with a Tide creature the player glides onto the isle
+    val (ix, iy) = Abilities.ISLE[0] to Abilities.ISLE[1]
+    g.px = 3.5f; g.py = iy + 1.5f; g.dir = 3
+    g.sel = g.inv.slots.indexOfFirst { it?.id == Tool.HOE }
+    act(); val noCross = g.ferry == null && g.px < 4f
+    g.party.add(Mon(6, 12, "Drip"))
+    act(); val ferryStarted = g.ferry != null
+    stepFor(0.5f)
+    g.particles.removeAll { it.kind == Effects.RIPPLE && it.t > 0.3f }
+    renderArea(art, mt, 3, 1, 7, 14, 9, 4, "$out/isle.png", g).also { it.particles(art, g, mt, 1, 7, 4); it.save("$out/isle.png") }
+    stepFor(3f)
+    val onIsle = g.ferry == null && g.px.toInt() == ix && g.py.toInt() == iy + 1
+    val seaRefused = Abilities.crossTarget(g.areas["beach"]!!, 20, 15, 0, 1) == null
+    // ---- GLOW: the mines light up and a marked rock hides the ladder
+    g.party.clear(); g.party.add(Mon(15, 10, "Bun")); g.enterMine(3)
+    val dimMine = g.cur
+    val noGlint = dimMine.glint == -1
+    val ltDark = g.lighting(0, 0, dimMine.w, dimMine.h)
+    val darkSheet = renderArea(art, dimMine, 0, 0, 0, 30, 22, 2, "$out/mine_dark.png", g); val darkMean = darkSheet.lightmap(ltDark, 0, 0, 30, 22, 2); darkSheet.save("$out/mine_dark.png")
+    g.party.add(Mon(3, 12, "Ember")); g.enterMine(3)
+    val m = g.cur
+    val glint = m.glint
+    val lt = g.lighting(0, 0, m.w, m.h)
+    val litSheet = renderArea(art, m, 0, 0, 0, 30, 22, 2, "$out/mine_lit.png", g); val litMean = litSheet.lightmap(lt, 0, 0, 30, 22, 2); litSheet.save("$out/mine_lit.png")
+    var ladder = false
+    if (glint >= 0) {
+        val gx = glint % m.w; val gy = glint / m.w
+        m.aux[glint] = 1; g.px = gx + 0.5f; g.py = gy + 1.5f; g.dir = 1
+        if (m.solid(gx, gy + 1)) { g.px = gx + 0.5f; g.py = gy - 0.5f; g.dir = 0 }
+        g.sel = g.inv.slots.indexOfFirst { it?.id == Tool.PICK }; g.useHeld()
+        ladder = m.o(gx, gy) == Ob.LADDER
+    }
+    // ---- save / old-save
+    g.save(); val g2 = Game(g.saveFile)
+    val saved = g2.fieldIntro && g2.fieldUses == g.fieldUses && g2.fieldTip == g.fieldTip
+    val old = org.json.JSONObject(g.saveFile.readText()); for (k in listOf("fieldTip", "fieldIntro", "fieldUses")) old.remove(k)
+    val oldF = File("$out/save_old_field.json"); oldF.writeText(old.toString()); val g3 = Game(oldF)
+    val oldOk = g3.started && !g3.fieldIntro && g3.fieldUses == 0
+    oldF.delete()
+    println("abilities: intro=$intro refused=$refused cut=$cut particles=$parts cache=$cache bounced=$bounced noStone=$noStone smashed=$smashed")
+    println("abilities: noCross=$noCross ferry=$ferryStarted onIsle=$onIsle seaRefused=$seaRefused noGlint=$noGlint glint=${glint >= 0} ladder=$ladder dark=${"%.2f".format(darkMean)} lit=${"%.2f".format(litMean)} uses=${g.fieldUses} saved=$saved oldSave=$oldOk")
+    val ok = thorns >= 24 && hollowSealed && nookSealed && isleSealed && gateReachable && intro && refused && cut && cache && bounced && noStone && smashed &&
+        noCross && ferryStarted && onIsle && seaRefused && noGlint && glint >= 0 && ladder && litMean < darkMean - 0.08f && saved && oldOk
+    println("CHECK abilities: " + if (ok) "PASS" else "FAIL")
+    g.party.clear(); g.party.addAll(keepParty)
+
+    // ---- effects sheet (6x): debris bits, puff/splash/twinkle/ripple/step frames, weather, obstacles
+    val es = Sheet(1500, 620); es.fill(0xFF5E9E48.toInt()); var ex = 10
+    for ((k, t) in listOf(Effects.CHIP to 0, Effects.SHARD to 0, Effects.SHARD to 0xFFE0874A.toInt(), Effects.LEAF to 0, Effects.LEAF to 2, Effects.LEAF to 5, Effects.CLOD to 0, Effects.DROP to 0, Effects.GEL to 0xFFB45AE0.toInt(), Effects.TWIG to 0)) {
+        for ((vi, b) in art.bits(k, t).withIndex()) es.draw(b, ex, 10 + vi * 34, 6); ex += 34
+    }
+    ex = 10
+    for (l in listOf(art.puff, art.splash, art.twinkle, art.ripple, art.step, art.puffCave)) { for (b in l) { es.draw(b, ex, 120 + (72 - b.height * 6), 6); ex += b.width * 6 + 8 }; ex += 14 }
+    es.rect(0, 200, 1500, 330, 0xFF203048.toInt()); ex = 10
+    es.draw(art.rainDrop, ex, 210, 6); ex += 40; for (b in art.snowFlake) { es.draw(b, ex, 220, 6); ex += b.width * 6 + 12 }; es.draw(art.firefly, ex, 220, 6); ex += 50
+    for (lf in listOf(0, 2, 5)) { es.draw(art.bits(Effects.LEAF, lf)[0], ex, 230, 6); ex += 34 }
+    ex = 10
+    for (sn in 0..3) { es.draw(art.thorn[sn][0], ex, 340, 8); ex += 128 }; es.draw(art.thorn[1][1], ex, 340, 8); ex += 140
+    es.draw(art.crag, ex, 340 + (24 - 20) * 8, 8); ex += 140
+    es.draw(art.chest, ex, 340 + (24 - art.chest.height) * 8, 8)
+    es.save("$out/effects.png")
+
+    // ---- atmosphere renders: town at night, farm at dusk, farm in the rain
+    val town = g.areas["town"]!!
+    g.cur = town; g.px = 24.5f; g.py = 21.5f; g.time = 1290f; g.raining = false
+    val nt = renderArea(art, town, 0, 4, 4, 34, 26, 2, "$out/night_town.png", g); val nMean = nt.lightmap(g.lighting(4, 4, 38, 30), 4, 4, 34, 26, 2)
+    for (i in 0 until 14) nt.draw(art.firefly, ((i * 7919) % (nt.w / 2)) * 2, ((i * 6151) % (nt.h / 2)) * 2, 2)
+    nt.save("$out/night_town.png")
+    val farm = g.areas["farm"]!!
+    g.cur = farm; g.px = 12.5f; g.py = 10.5f; g.time = 1110f
+    val dk = renderArea(art, farm, 0, 4, 2, 20, 12, 4, "$out/dusk_farm.png", g); dk.lightmap(g.lighting(4, 2, 24, 14), 4, 2, 20, 12, 4); dk.save("$out/dusk_farm.png")
+    g.time = 720f; g.raining = true
+    val rn = renderArea(art, farm, 0, 4, 2, 20, 12, 4, "$out/rain_farm.png", g); rn.lightmap(g.lighting(4, 2, 24, 14), 4, 2, 20, 12, 4); rn.rain(art, 4, 3.3f); rn.save("$out/rain_farm.png")
+    g.raining = false; g.time = 600f
+    println("atmosphere: night=${"%.2f".format(nMean)} lights=${Light.buildingLights(town).size}")
 }
